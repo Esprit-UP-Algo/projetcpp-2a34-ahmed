@@ -1,0 +1,15 @@
+# ninja log v6
+14	657	7801080823359063	untitled_autogen/timestamp	2e80556bd3c5ba62
+14	657	7801080823359063	untitled_autogen/mocs_compilation.cpp	2e80556bd3c5ba62
+14	657	7801080823359063	C:/Users/zarrami/Documents/untitled/build/Desktop_Qt_6_7_3_MinGW_64_bit-Debug/untitled_autogen/timestamp	2e80556bd3c5ba62
+14	657	7801080823359063	C:/Users/zarrami/Documents/untitled/build/Desktop_Qt_6_7_3_MinGW_64_bit-Debug/untitled_autogen/mocs_compilation.cpp	2e80556bd3c5ba62
+665	2024	7801080824238534	CMakeFiles/untitled.dir/untitled_autogen/mocs_compilation.cpp.obj	5ee29cd91d603b6d
+687	2104	7801080824466181	CMakeFiles/untitled.dir/mainwindow.cpp.obj	a1263ec0a4a463d8
+7	131	7801081108768382	CMakeFiles/clean.additional	baedbe210acaa455
+131	160	7801081109993954	clean	577b940aee94fbd7
+27	756	7801087641668733	untitled_autogen/timestamp	2e80556bd3c5ba62
+27	756	7801087641668733	untitled_autogen/mocs_compilation.cpp	2e80556bd3c5ba62
+27	756	7801087641668733	C:/Users/zarrami/Documents/untitled/build/Desktop_Qt_6_7_3_MinGW_64_bit-Debug/untitled_autogen/timestamp	2e80556bd3c5ba62
+27	756	7801087641668733	C:/Users/zarrami/Documents/untitled/build/Desktop_Qt_6_7_3_MinGW_64_bit-Debug/untitled_autogen/mocs_compilation.cpp	2e80556bd3c5ba62
+759	2256	7801087642688147	CMakeFiles/untitled.dir/untitled_autogen/mocs_compilation.cpp.obj	5ee29cd91d603b6d
+776	2271	7801087642851886	CMakeFiles/untitled.dir/mainwindow.cpp.obj	a1263ec0a4a463d8
