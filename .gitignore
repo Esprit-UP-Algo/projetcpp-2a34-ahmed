@@ -1,0 +1,17 @@
+# Fichiers de compilation
+build/
+*.o
+*.a
+*.exe
+
+# CMake
+CMakeCache.txt
+CMakeFiles/
+cmake_install.cmake
+
+# Fichiers IDE
+*.txt.user
+
+# Fichiers temporaires
+*.tmp
+*.temp
