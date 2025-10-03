@@ -1,0 +1,35 @@
+
+
+# Ignorer les fichiers de build et compilés
+build/
+*.o
+*.obj
+*.exe
+*.log
+
+# Ignorer les fichiers Qt Creator
+*.user
+*.pro.user
+*.autosave
+.qt/
+.qtc/
+
+# Ignorer les fichiers CMake
+CMakeCache.txt
+CMakeFiles/
+*.cmake
+cmake_install.cmake
+rules.ninja
+build.ninja
+*.dir
+*.json
+
+
+# Fichiers Qt générés
+*.user
+*.pro.user
+*.autosave
+
+# Dossier de build
+build/
+
