@@ -3,18 +3,44 @@
 #include <QSqlError>
 #include <QDebug>
 
+// تهيئة المؤشر الثابت
+Connection* Connection::p_instance = nullptr;
+
+// constructor الخاص
 Connection::Connection()
 {
+    qDebug() << "تم إنشاء instance اتصال قاعدة البيانات";
 }
 
+// destructor الخاص
+Connection::~Connection()
+{
+    QSqlDatabase db = QSqlDatabase::database();
+    if (db.isOpen()) {
+        db.close();
+        qDebug() << "تم إغلاق اتصال قاعدة البيانات";
+    }
+    qDebug() << "تم تدمير instance اتصال قاعدة البيانات";
+}
+
+// طريقة للحصول على الinstance الفريدة
+Connection* Connection::instance()
+{
+    if (p_instance == nullptr) {
+        p_instance = new Connection();
+    }
+    return p_instance;
+}
+
+// طريقة لإنشاء الاتصال بقاعدة البيانات
 bool Connection::connect()
 {
-    bool test = false;  // Corrigé: False -> false (minuscule)
+    bool test = false;
 
-    QSqlDatabase db = QSqlDatabase::addDatabase("QODBC"); // Corrigé: QSq\Database -> QSqlDatabase
-    db.setDatabaseName("Source_Projet2A");    // insérer le nom de la source de données
-    db.setUserName("ahmed");    // insérer nom de l'utilisateur
-    db.setPassword("esprit25");    // insérer mot de passe de cet utilisateur
+    QSqlDatabase db = QSqlDatabase::addDatabase("QODBC");
+    db.setDatabaseName("Source_Projet2A");    // اسم مصدر البيانات
+    db.setUserName("ahmed");    // اسم المستخدم
+    db.setPassword("esprit25");    // كلمة المرور
 
     if (db.open()) {
         test = true;
@@ -23,5 +49,5 @@ bool Connection::connect()
         qDebug() << "Erreur de connexion:" << db.lastError().text();
     }
 
-    return test;  // Retourner le résultat en dehors du if
+    return test;
 }

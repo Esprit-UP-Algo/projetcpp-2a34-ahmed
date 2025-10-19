@@ -28,11 +28,13 @@ CONFIG += c++11
 SOURCES += \
         main.cpp \
         mainwindow.cpp \
-    connection.cpp
+    connection.cpp \
+    vehicule.cpp
 
 HEADERS += \
         mainwindow.h \
-    connection.h
+    connection.h \
+    vehicule.h
 
 FORMS += \
         mainwindow.ui
