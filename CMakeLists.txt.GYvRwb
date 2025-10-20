@@ -17,16 +17,13 @@ set(PROJECT_SOURCES
         mainwindow.cpp
         mainwindow.h
         mainwindow.ui
-        modifier_2.ui
-        modifier_2.h
-        modifier_2.cpp
 )
 
 if(${QT_VERSION_MAJOR} GREATER_EQUAL 6)
     qt_add_executable(gestion-seance
         MANUAL_FINALIZATION
         ${PROJECT_SOURCES}
-        modifier_2.h modifier_2.cpp modifier_2.ui
+        modifier.h modifier.cpp modifier.ui
     )
 # Define target properties for Android with Qt 6 as:
 #    set_property(TARGET gestion-seance APPEND PROPERTY QT_ANDROID_PACKAGE_SOURCE_DIR
