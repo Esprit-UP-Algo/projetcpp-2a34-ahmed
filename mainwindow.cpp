@@ -1,6 +1,7 @@
 #include "mainwindow.h"
 #include "ui_mainwindow.h"
 #include "connection.h"
+#include "arduino.h"
 #include <QSqlQuery>
 #include <QMessageBox>
 #include <QDate>
@@ -10,6 +11,30 @@
 #include <QModelIndexList>
 #include <QHeaderView>
 #include <QDebug>
+#include <QVBoxLayout>
+#include <QHBoxLayout>
+#include <QLabel>
+#include <QTextEdit>
+#include <QTabWidget>
+#include <QDialog>
+#include <QPushButton>
+#include <QDialogButtonBox>
+#include <QTimer>
+#include <QtCharts>
+#include <QFileDialog>
+#include <QDateTime>
+#include <QRandomGenerator>
+#include <QHash>
+#include <QCryptographicHash>
+#include <QMenu>
+#include <QInputDialog>
+#include <QClipboard>
+#include <QGroupBox>
+#include <QApplication>
+#include <QStyle>
+#include <QPainter>
+#include <QSystemTrayIcon>
+#include <QSerialPort>
 
 MainWindow::MainWindow(QWidget *parent)
     : QMainWindow(parent)
@@ -17,98 +42,1019 @@ MainWindow::MainWindow(QWidget *parent)
 {
     ui->setupUi(this);
 
-    Connection c;
-    c.connect(); // connexion base
+    // Initialisation des membres de notification
+    alertCount = 0;
+    trayIcon = nullptr;
+    trayMenu = nullptr;
 
-    // Ajouter 5 colonnes au tableau (sans ID)
-    ui->tab->setColumnCount(5);
-    ui->tab->setHorizontalHeaderLabels({"Immatriculation", "Modèle du véhicule", "Kilométrage", "Date assurance", "État"});
+    // === CONNEXION ARDUINO ===
+    int ret = A.connect_arduino();
+    switch(ret){
+    case(0):
+        qDebug() << "Arduino connecté à:" << A.getarduino_port_name();
+        ui->label_3->setText("Arduino Connecté");
+        break;
+    case(1):
+        qDebug() << "Arduino disponible mais non connecté";
+        ui->label_3->setText("Arduino Non Connecté");
+        break;
+    case(-1):
+        qDebug() << "Arduino non disponible";
+        ui->label_3->setText("Arduino Non Trouvé");
+        break;
+    }
+
+    QObject::connect(A.getserial(), &QSerialPort::readyRead, this, &MainWindow::update_label);
+
+    // === STYLE DU BOUTON Vehicule_6 ===
+    QPushButton *btnVehicule6 = findChild<QPushButton*>("Vehicule_6");
+    if (btnVehicule6) {
+        btnVehicule6->setStyleSheet(
+            "QPushButton {"
+            "    background-color: #4CAF50;"
+            "    color: white;"
+            "    font-weight: bold;"
+            "    font-size: 14px;"
+            "    padding: 10px;"
+            "    border: 2px solid #45a049;"
+            "    border-radius: 8px;"
+            "}"
+            "QPushButton:hover {"
+            "    background-color: #45a049;"
+            "    border: 2px solid #3d8b40;"
+            "}"
+            "QPushButton:pressed {"
+            "    background-color: #3d8b40;"
+            "}"
+            );
+        btnVehicule6->setText("Véhicule");
+    }
+
+    // === BOUTON QR CODE ===
+    QPushButton *btnQRCode = findChild<QPushButton*>("btnQRCode");
+    if (!btnQRCode) {
+        btnQRCode = new QPushButton("📱 QR Code", this);
+        btnQRCode->setObjectName("btnQRCode");
+        btnQRCode->setStyleSheet(
+            "QPushButton {"
+            "    background-color: #2196F3;"
+            "    color: white;"
+            "    font-weight: bold;"
+            "    font-size: 14px;"
+            "    padding: 10px;"
+            "    border: 2px solid #1976D2;"
+            "    border-radius: 8px;"
+            "}"
+            "QPushButton:hover {"
+            "    background-color: #1976D2;"
+            "    border: 2px solid #1565C0;"
+            "}"
+            "QPushButton:pressed {"
+            "    background-color: #1565C0;"
+            "}"
+            );
+        btnQRCode->setFixedSize(120, 40);
+        btnQRCode->move(this->width() - 140, 10);
+    }
+    connect(btnQRCode, &QPushButton::clicked, this, &MainWindow::on_btnQRCode_clicked);
+
+    // === BOUTON SMART MAINTENANCE TAG ===
+    QPushButton *btnSmartTag = new QPushButton("🔧 Smart Tag", this);
+    btnSmartTag->setObjectName("btnSmartTag");
+    btnSmartTag->setStyleSheet(
+        "QPushButton {"
+        "    background-color: #FF9800;"
+        "    color: white;"
+        "    font-weight: bold;"
+        "    font-size: 14px;"
+        "    padding: 10px;"
+        "    border: 2px solid #F57C00;"
+        "    border-radius: 8px;"
+        "}"
+        "QPushButton:hover {"
+        "    background-color: #F57C00;"
+        "    border: 2px solid #EF6C00;"
+        "}"
+        "QPushButton:pressed {"
+        "    background-color: #EF6C00;"
+        "}"
+        );
+    btnSmartTag->setFixedSize(120, 40);
+    btnSmartTag->move(this->width() - 270, 10);
+    connect(btnSmartTag, &QPushButton::clicked, this, &MainWindow::on_btnSmartTag_clicked);
+
+    // === NOTIFICATION ICON ===
+    setupTrayIcon();
+
+    // === CONNEXION BASE DE DONNÉES ===
+    Connection c;
+    if (!c.connect()) {
+        QMessageBox::critical(this, "Erreur", "Connexion à la base de données échouée !");
+    }
+
+    // === CONFIGURATION DE L'INTERFACE VÉHICULES ===
+    ui->tab->setColumnCount(6);
+    ui->tab->setHorizontalHeaderLabels({"Immatriculation", "Modèle", "Kilométrage", "Date assurance", "État", "Température"});
+
+    // Ajuster la largeur des colonnes
+    ui->tab->setColumnWidth(0, 150);
+    ui->tab->setColumnWidth(1, 200);
+    ui->tab->setColumnWidth(2, 120);
+    ui->tab->setColumnWidth(3, 120);
+    ui->tab->setColumnWidth(4, 100);
+    ui->tab->setColumnWidth(5, 120);
 
     // === CONTRÔLES DE SAISIE ===
-
-    // 1. Immatriculation : Format AA-123-AA ou 123-AA-1200
-    QRegularExpression immatRegex("^[A-Z]{2}-\\d{3}-[A-Z]{2}$|^\\d{3}-[A-Z]{2}-\\d{4}$");
+    QRegularExpression immatRegex("^[A-Z]{2}-\\d{3}-[A-Z]{2}$|^\\d{3,4}-[A-Z]{2}-\\d{3,4}$");
     ui->Immatriculation_3->setValidator(new QRegularExpressionValidator(immatRegex, this));
-    ui->Immatriculation_3->setPlaceholderText("Format: AB-123-CD ou 123-AB-1200");
-    ui->Immatriculation_3->setToolTip("Format accepté: AB-123-CD ou 123-AB-1200");
+    ui->Immatriculation_3->setPlaceholderText("AB-123-CD ou 123-AB-1200");
 
-    // 2. Modèle du véhicule : Lettres, chiffres, espaces et tirets
     QRegularExpression modeleRegex("^[a-zA-Z0-9\\s\\-]{0,20}$");
     ui->mo->setValidator(new QRegularExpressionValidator(modeleRegex, this));
     ui->mo->setMaxLength(20);
     ui->mo->setPlaceholderText("Max 20 caractères");
-    ui->mo->setToolTip("Lettres, chiffres, espaces et tirets uniquement");
 
-    // 3. Kilométrage : Uniquement des chiffres, maximum 7 chiffres
     QRegularExpression kmRegex("^\\d{0,7}$");
     ui->kilo->setValidator(new QRegularExpressionValidator(kmRegex, this));
     ui->kilo->setPlaceholderText("Ex: 150000");
-    ui->kilo->setToolTip("Chiffres uniquement (0-9999999)");
 
-    // 4. Date assurance : Format date JJ/MM/AAAA
     QRegularExpression dateRegex("^(0[1-9]|[12][0-9]|3[01])/(0[1-9]|1[0-2])/\\d{4}$");
     ui->date_3->setValidator(new QRegularExpressionValidator(dateRegex, this));
     ui->date_3->setPlaceholderText("JJ/MM/AAAA");
-    ui->date_3->setToolTip("Format: JJ/MM/AAAA (ex: 08/11/2024)");
 
-    // 5. État : QLineEdit avec validation
     QRegularExpression etatRegex("^[a-zA-Zéèêëàâäôöûüç\\s]{0,20}$");
     ui->ett->setValidator(new QRegularExpressionValidator(etatRegex, this));
     ui->ett->setMaxLength(20);
-    ui->ett->setPlaceholderText("Ex: Bon état, Neuf, Usé...");
-    ui->ett->setToolTip("Lettres et espaces uniquement, max 20 caractères");
+    ui->ett->setPlaceholderText("Ex: neuf, bon, usé...");
 
-    // 6. Recherche : Pas de validation spécifique pour permettre toute immatriculation
     ui->identifant_5->setPlaceholderText("Entrez une immatriculation");
-    ui->identifant_5->setToolTip("Entrez l'immatriculation exacte du véhicule à rechercher");
 
-    // 7. ComboBox pour le tri
+    // ComboBox pour le tri
     ui->comboBox_5->addItem("Trier par...");
+    ui->comboBox_5->addItem("Immatriculation");
     ui->comboBox_5->addItem("Kilométrage");
     ui->comboBox_5->addItem("État");
     ui->comboBox_5->addItem("Date assurance");
-    ui->comboBox_5->setToolTip("Choisissez le critère de tri");
+    ui->comboBox_5->addItem("Température");
 
-    // 8. Boutons pour le tri
-    ui->pushButton_19->setText("↑"); // Tri ascendant
-    ui->pushButton_19->setToolTip("Tri ascendant");
-    ui->pushButton_20->setText("↓"); // Tri descendant
-    ui->pushButton_20->setToolTip("Tri descendant");
-
-    // 9. Bouton pour les statistiques
-    ui->pushButton_statistique_6->setText("Statistiques");
-    ui->pushButton_statistique_6->setToolTip("Voir les statistiques des véhicules");
-
-    // 10. Bouton de retour (sur la page 2)
-    // Le texte et tooltip seront définis dans l'interface UI
+    // Boutons de tri
+    ui->pushButton_19->setText("↑");
+    ui->pushButton_20->setText("↓");
 
     // Charger tous les véhicules au démarrage
     chargerTousLesVehicules();
+
+    // === SYSTEME D'ALERTES ASSURANCE ===
+    QTimer::singleShot(1000, this, &MainWindow::verifierAlertesAssurance);
+
+    QTimer *timerAlertes = new QTimer(this);
+    connect(timerAlertes, &QTimer::timeout, this, &MainWindow::verifierAlertesAssurance);
+    timerAlertes->start(3600000); // 1 heure
+
+    // === SYSTEME D'ALERTES INTELLIGENTES ===
+    QTimer::singleShot(1500, this, &MainWindow::verifierAssurances30Jours);
+
+    QTimer *timerAlertesAuto = new QTimer(this);
+    connect(timerAlertesAuto, &QTimer::timeout, this, &MainWindow::verifierAssurances30Jours);
+    timerAlertesAuto->start(3600000); // Vérifie toutes les heures
 }
 
 MainWindow::~MainWindow()
 {
+    if (trayIcon) {
+        trayIcon->hide();
+    }
     delete ui;
 }
 
-// Fonction pour charger tous les véhicules
-void MainWindow::chargerTousLesVehicules() {
-    QSqlQuery query("SELECT IMMATRICULATION, MODÈLE_DU_VEHICLE, KILOMÉTRAGE, DATE_ASSURANCE, ÉTAT FROM VEHICULE ORDER BY IMMATRICULATION");
+// === FONCTIONS ARDUINO ===
+void MainWindow::update_label()
+{
+    if(A.getserial()->isOpen() && A.getserial()->isReadable()) {
+        qint64 bytesAvailable = A.getserial()->bytesAvailable();
 
+        if(bytesAvailable > 0) {
+            data = A.read_from_arduino();
+            QString dataStr = QString(data).trimmed();
+
+            qDebug() << "Données reçues d'Arduino:" << dataStr;
+
+            // Détection de la température
+            QRegularExpression tempRegex("TEMP[=:]?(\\d+)", QRegularExpression::CaseInsensitiveOption);
+            QRegularExpression simpleTempRegex("^\\d+$");
+
+            QRegularExpressionMatch match = tempRegex.match(dataStr);
+            QRegularExpressionMatch simpleMatch = simpleTempRegex.match(dataStr);
+
+            if (match.hasMatch() || simpleMatch.hasMatch()) {
+                int temperature;
+                if (match.hasMatch()) {
+                    temperature = match.captured(1).toInt();
+                } else {
+                    temperature = simpleMatch.captured(0).toInt();
+                }
+
+                ui->label_3->setText("Température: " + QString::number(temperature) + "°C");
+                ui->label_3->setStyleSheet("color: white; font-weight: bold; background-color: #ff6600; padding: 8px; border: 2px solid #cc5500; border-radius: 8px;");
+
+                mettreAJourTemperature(temperature);
+
+            } else {
+                // Gestion des autres commandes
+                if(dataStr.contains("allumée", Qt::CaseInsensitive) || dataStr == "1") {
+                    ui->label_3->setText("LED ALLUMÉE");
+                    ui->label_3->setStyleSheet("color: white; font-weight: bold; background-color: #00aa00; padding: 8px; border: 2px solid #008800; border-radius: 8px;");
+                }
+                else if(dataStr.contains("éteinte", Qt::CaseInsensitive) || dataStr == "0") {
+                    ui->label_3->setText("LED ÉTEINTE");
+                    ui->label_3->setStyleSheet("color: white; font-weight: bold; background-color: #aa0000; padding: 8px; border: 2px solid #880000; border-radius: 8px;");
+                }
+                else if(dataStr.contains("+") || dataStr.contains("plus", Qt::CaseInsensitive)) {
+                    ui->label_3->setText("BOUTON +");
+                    ui->label_3->setStyleSheet("color: white; font-weight: bold; background-color: #0066aa; padding: 8px; border: 2px solid #004488; border-radius: 8px;");
+                }
+                else if(dataStr.contains("-") || dataStr.contains("moins", Qt::CaseInsensitive)) {
+                    ui->label_3->setText("BOUTON -");
+                    ui->label_3->setStyleSheet("color: white; font-weight: bold; background-color: #aa6600; padding: 8px; border: 2px solid #884400; border-radius: 8px;");
+                }
+                else if(!dataStr.isEmpty()) {
+                    ui->label_3->setText(dataStr.left(20));
+                    ui->label_3->setStyleSheet("color: black; font-weight: bold; background-color: #ffffaa; padding: 8px; border: 2px solid #cccc00; border-radius: 8px;");
+                }
+            }
+
+            ui->label_3->repaint();
+        }
+    } else {
+        ui->label_3->setText("Port série fermé");
+        ui->label_3->setStyleSheet("color: white; background-color: #666666; padding: 5px; border: 1px solid #444444;");
+    }
+}
+
+void MainWindow::mettreAJourTemperature(int temperature)
+{
+    QModelIndexList selectedIndexes = ui->tab->selectionModel()->selectedIndexes();
+    if (selectedIndexes.isEmpty()) {
+        qDebug() << "Aucun véhicule sélectionné pour mettre à jour la température";
+        return;
+    }
+
+    int row = selectedIndexes.first().row();
+    QString immatriculation = ui->tab->item(row, 0)->text();
+
+    QSqlQuery query;
+    query.prepare("UPDATE VEHICULE SET TEMPERATURE = :temp WHERE IMMATRICULATION = :imm");
+    query.bindValue(":temp", temperature);
+    query.bindValue(":imm", immatriculation);
+
+    if (query.exec()) {
+        ui->tab->setItem(row, 5, new QTableWidgetItem(QString::number(temperature) + "°C"));
+        qDebug() << "Température mise à jour pour" << immatriculation << ":" << temperature << "°C";
+
+        mettreAJourEtatVehicule(immatriculation, temperature);
+    } else {
+        qDebug() << "Erreur mise à jour température:" << query.lastError().text();
+    }
+}
+
+void MainWindow::mettreAJourEtatVehicule(const QString& immatriculation, int temperature)
+{
+    QString nouvelEtat;
+    QColor backgroundColor;
+    QColor textColor = Qt::black;
+
+    if (temperature > 40) {
+        nouvelEtat = "SURCHAUFFE";
+        backgroundColor = QColor(255, 200, 200); // Rouge clair
+        textColor = QColor(139, 0, 0); // Rouge foncé
+    } else if (temperature > 30) {
+        nouvelEtat = "CHAUDE";
+        backgroundColor = QColor(255, 255, 200); // Jaune clair
+    } else if (temperature > 20) {
+        nouvelEtat = "NORMALE";
+        backgroundColor = QColor(200, 255, 200); // Vert clair
+    } else {
+        nouvelEtat = "FROIDE";
+        backgroundColor = QColor(200, 200, 255); // Bleu clair
+    }
+
+    // Mettre à jour la base de données
+    QSqlQuery query;
+    query.prepare("UPDATE VEHICULE SET ÉTAT = :etat WHERE IMMATRICULATION = :imm");
+    query.bindValue(":etat", nouvelEtat);
+    query.bindValue(":imm", immatriculation);
+
+    if (query.exec()) {
+        // Mettre à jour l'affichage dans le tableau
+        for (int row = 0; row < ui->tab->rowCount(); ++row) {
+            if (ui->tab->item(row, 0)->text() == immatriculation) {
+                ui->tab->setItem(row, 4, new QTableWidgetItem(nouvelEtat));
+
+                // Appliquer les couleurs
+                for (int col = 0; col < ui->tab->columnCount(); ++col) {
+                    QTableWidgetItem* item = ui->tab->item(row, col);
+                    if (item) {
+                        item->setBackground(backgroundColor);
+                        item->setForeground(textColor);
+                    }
+                }
+
+                // Alerte pour surchauffe
+                if (temperature > 40) {
+                    qDebug() << "ALERTE: Véhicule" << immatriculation << "en SURCHAUFFE! Température:" << temperature << "°C";
+                    QMessageBox::warning(this, "ALERTE SURCHAUFFE",
+                                         QString("Le véhicule %1 est en SURCHAUFFE!\n\n"
+                                                 "Température mesurée: %2°C\n"
+                                                 "Veuillez vérifier le véhicule immédiatement.")
+                                             .arg(immatriculation).arg(temperature));
+                }
+
+                qDebug() << "État mis à jour pour" << immatriculation << ":" << nouvelEtat << "(Température:" << temperature << "°C)";
+                break;
+            }
+        }
+    } else {
+        qDebug() << "Erreur mise à jour état:" << query.lastError().text();
+    }
+}
+
+void MainWindow::on_pushButton_clicked() // ON
+{
+    A.write_to_arduino("1");
+    ui->label_3->setText("Envoi ON...");
+    ui->label_3->setStyleSheet("color: black; background-color: yellow; padding: 5px; border: 2px solid orange;");
+}
+
+void MainWindow::on_pushButton_2_clicked() // OFF
+{
+    A.write_to_arduino("0");
+    ui->label_3->setText("Envoi OFF...");
+    ui->label_3->setStyleSheet("color: black; background-color: yellow; padding: 5px; border: 2px solid orange;");
+}
+
+void MainWindow::on_pushButton_3_clicked() // +
+{
+    A.write_to_arduino("2");
+    ui->label_3->setText("Envoi +...");
+    ui->label_3->setStyleSheet("color: black; background-color: yellow; padding: 5px; border: 2px solid orange;");
+}
+
+void MainWindow::on_pushButton_4_clicked() // -
+{
+    A.write_to_arduino("3");
+    ui->label_3->setText("Envoi -...");
+    ui->label_3->setStyleSheet("color: black; background-color: yellow; padding: 5px; border: 2px solid orange;");
+}
+
+// === FONCTIONS SMART MAINTENANCE TAG ===
+QPixmap MainWindow::generateQRCode(const QString& text, int size)
+{
+    QPixmap pixmap(size, size);
+    pixmap.fill(Qt::white);
+
+    QPainter painter(&pixmap);
+    painter.setRenderHint(QPainter::Antialiasing);
+
+    int margin = 20;
+    int moduleSize = (size - 2 * margin) / 21;
+
+    // Dessiner les motifs de position
+    painter.setBrush(Qt::black);
+    painter.setPen(Qt::NoPen);
+
+    // Coin supérieur gauche
+    painter.drawRect(margin, margin, 7 * moduleSize, 7 * moduleSize);
+    painter.setBrush(Qt::white);
+    painter.drawRect(margin + moduleSize, margin + moduleSize, 5 * moduleSize, 5 * moduleSize);
+    painter.setBrush(Qt::black);
+    painter.drawRect(margin + 2 * moduleSize, margin + 2 * moduleSize, 3 * moduleSize, 3 * moduleSize);
+
+    // Coin supérieur droit
+    painter.setBrush(Qt::black);
+    painter.drawRect(margin + 14 * moduleSize, margin, 7 * moduleSize, 7 * moduleSize);
+    painter.setBrush(Qt::white);
+    painter.drawRect(margin + 15 * moduleSize, margin + moduleSize, 5 * moduleSize, 5 * moduleSize);
+    painter.setBrush(Qt::black);
+    painter.drawRect(margin + 16 * moduleSize, margin + 2 * moduleSize, 3 * moduleSize, 3 * moduleSize);
+
+    // Coin inférieur gauche
+    painter.setBrush(Qt::black);
+    painter.drawRect(margin, margin + 14 * moduleSize, 7 * moduleSize, 7 * moduleSize);
+    painter.setBrush(Qt::white);
+    painter.drawRect(margin + moduleSize, margin + 15 * moduleSize, 5 * moduleSize, 5 * moduleSize);
+    painter.setBrush(Qt::black);
+    painter.drawRect(margin + 2 * moduleSize, margin + 16 * moduleSize, 3 * moduleSize, 3 * moduleSize);
+
+    // Modules de données basés sur le hash du texte
+    uint hash = qHash(text);
+    painter.setBrush(Qt::black);
+
+    for (int y = 0; y < 21; y++) {
+        for (int x = 0; x < 21; x++) {
+            if ((x < 7 && y < 7) || (x > 13 && y < 7) || (x < 7 && y > 13)) {
+                continue;
+            }
+
+            bool shouldDraw = false;
+            if (x >= 7 && x <= 13 && y >= 7 && y <= 13) {
+                shouldDraw = (hash >> ((x-7) + (y-7) * 7)) & 1;
+            } else {
+                shouldDraw = (hash >> (x + y * 3)) & 1;
+            }
+
+            if (shouldDraw) {
+                painter.drawRect(margin + x * moduleSize,
+                                 margin + y * moduleSize,
+                                 moduleSize, moduleSize);
+            }
+        }
+    }
+
+    return pixmap;
+}
+
+QString MainWindow::genererSmartTagData(const QString& immatriculation)
+{
+    QSqlQuery query;
+    query.prepare("SELECT IMMATRICULATION, MODÈLE_DU_VEHICLE, KILOMÉTRAGE, DATE_ASSURANCE, ÉTAT, TEMPERATURE FROM VEHICULE WHERE IMMATRICULATION = :immat");
+    query.bindValue(":immat", immatriculation);
+
+    if (query.exec() && query.next()) {
+        QString modele = query.value(1).toString();
+        QString kilometrage = query.value(2).toString();
+        QString dateAssurance = query.value(3).toDate().toString("ddMMyyyy");
+        QString etat = query.value(4).toString();
+        QString temperature = query.value(5).toString();
+
+        // Générer un hash de sécurité
+        QString timestamp = QDateTime::currentDateTime().toString("yyyyMMdd");
+        QString hash = QCryptographicHash::hash(
+                           (immatriculation + timestamp + "kia_secret_2024").toUtf8(),
+                           QCryptographicHash::Sha256
+                           ).toHex().left(8);
+
+        return QString("KIA_SMART|%1|%2|%3|%4|%5|%6|%7|%8")
+            .arg(immatriculation)
+            .arg(modele)
+            .arg(kilometrage)
+            .arg(dateAssurance)
+            .arg(etat)
+            .arg(temperature)
+            .arg(timestamp)
+            .arg(hash);
+    }
+
+    return "";
+}
+
+QString MainWindow::getCouleurStatutVehicule(const QString& immatriculation)
+{
+    QSqlQuery query;
+    query.prepare("SELECT DATE_ASSURANCE, KILOMÉTRAGE, ÉTAT FROM VEHICULE WHERE IMMATRICULATION = :immat");
+    query.bindValue(":immat", immatriculation);
+
+    if (query.exec() && query.next()) {
+        QDate dateAssurance = query.value(0).toDate();
+        int kilometrage = query.value(1).toInt();
+        QString etat = query.value(2).toString().toLower();
+
+        QDate aujourdhui = QDate::currentDate();
+        int joursRestants = aujourdhui.daysTo(dateAssurance);
+
+        // Logique de couleur
+        if (joursRestants < 0) return "ROUGE";        // Assurance expirée
+        if (joursRestants <= 7) return "ORANGE";      // Urgent
+        if (kilometrage > 150000) return "ORANGE";    // Kilométrage élevé
+        if (etat.contains("usé") || etat.contains("mauvais")) return "ORANGE";
+        if (joursRestants <= 30) return "JAUNE";      // Attention
+
+        return "VERT"; // Tout est OK
+    }
+
+    return "BLEU"; // Statut inconnu
+}
+
+void MainWindow::on_btnSmartTag_clicked()
+{
+    QModelIndexList selectedIndexes = ui->tab->selectionModel()->selectedIndexes();
+    if (selectedIndexes.isEmpty()) {
+        QMessageBox::information(this, "Smart Tag", "Veuillez sélectionner un véhicule dans le tableau pour générer son Smart Tag.");
+        return;
+    }
+
+    int row = selectedIndexes.first().row();
+    QString immatriculation = ui->tab->item(row, 0)->text();
+
+    afficherSmartTagDialog(immatriculation);
+}
+
+void MainWindow::afficherSmartTagDialog(const QString& immatriculation)
+{
+    QDialog *smartTagDialog = new QDialog(this);
+    smartTagDialog->setWindowTitle("🔧 Smart Maintenance Tag - " + immatriculation);
+    smartTagDialog->setFixedSize(500, 700);
+
+    QVBoxLayout *layout = new QVBoxLayout(smartTagDialog);
+
+    // En-tête
+    QLabel *titleLabel = new QLabel("🔧 SMART MAINTENANCE TAG");
+    titleLabel->setStyleSheet("font-size: 20px; font-weight: bold; color: #2c3e50; padding: 15px; background-color: #fff3e0; border-radius: 10px;");
+    titleLabel->setAlignment(Qt::AlignCenter);
+    layout->addWidget(titleLabel);
+
+    // Informations véhicule
+    QSqlQuery query;
+    query.prepare("SELECT IMMATRICULATION, MODÈLE_DU_VEHICLE, KILOMÉTRAGE, DATE_ASSURANCE, ÉTAT, TEMPERATURE FROM VEHICULE WHERE IMMATRICULATION = :immat");
+    query.bindValue(":immat", immatriculation);
+
+    if (query.exec() && query.next()) {
+        QString modele = query.value(1).toString();
+        QString kilometrage = query.value(2).toString();
+        QDate dateAssurance = query.value(3).toDate();
+        QString etat = query.value(4).toString();
+        QString temperature = query.value(5).toString();
+
+        // Carte d'information véhicule
+        QFrame *infoFrame = new QFrame();
+        infoFrame->setStyleSheet("background-color: #f8f9fa; border: 2px solid #dee2e6; border-radius: 10px; padding: 15px;");
+        QVBoxLayout *infoLayout = new QVBoxLayout(infoFrame);
+
+        QLabel *vehicleTitle = new QLabel("🚗 VÉHICULE");
+        vehicleTitle->setStyleSheet("font-size: 16px; font-weight: bold; color: #495057; margin-bottom: 10px;");
+        infoLayout->addWidget(vehicleTitle);
+
+        // Grille d'informations
+        QGridLayout *gridLayout = new QGridLayout();
+
+        gridLayout->addWidget(new QLabel("Immatriculation:"), 0, 0);
+        QLabel *immLabel = new QLabel(immatriculation);
+        immLabel->setStyleSheet("font-weight: bold; color: #1976d2;");
+        gridLayout->addWidget(immLabel, 0, 1);
+
+        gridLayout->addWidget(new QLabel("Modèle:"), 1, 0);
+        gridLayout->addWidget(new QLabel(modele), 1, 1);
+
+        gridLayout->addWidget(new QLabel("Kilométrage:"), 2, 0);
+        gridLayout->addWidget(new QLabel(kilometrage + " km"), 2, 1);
+
+        gridLayout->addWidget(new QLabel("Assurance:"), 3, 0);
+        QString assuranceText = dateAssurance.isValid() ? dateAssurance.toString("dd/MM/yyyy") : "Non renseignée";
+        QLabel *assuranceLabel = new QLabel(assuranceText);
+
+        // Colorer selon la date d'assurance
+        if (dateAssurance.isValid()) {
+            int joursRestants = QDate::currentDate().daysTo(dateAssurance);
+            if (joursRestants < 0) {
+                assuranceLabel->setStyleSheet("color: #dc3545; font-weight: bold;");
+                assuranceLabel->setText(assuranceText + " ⛔ EXPIRÉE");
+            } else if (joursRestants <= 7) {
+                assuranceLabel->setStyleSheet("color: #fd7e14; font-weight: bold;");
+                assuranceLabel->setText(assuranceText + " ⚠️ URGENT");
+            } else if (joursRestants <= 30) {
+                assuranceLabel->setStyleSheet("color: #ffc107; font-weight: bold;");
+                assuranceLabel->setText(assuranceText + " 📅 Bientôt");
+            } else {
+                assuranceLabel->setStyleSheet("color: #28a745; font-weight: bold;");
+            }
+        }
+        gridLayout->addWidget(assuranceLabel, 3, 1);
+
+        gridLayout->addWidget(new QLabel("État:"), 4, 0);
+        gridLayout->addWidget(new QLabel(etat), 4, 1);
+
+        gridLayout->addWidget(new QLabel("Température:"), 5, 0);
+        gridLayout->addWidget(new QLabel(temperature + "°C"), 5, 1);
+
+        infoLayout->addLayout(gridLayout);
+        layout->addWidget(infoFrame);
+
+        // QR Code dynamique
+        QLabel *qrTitle = new QLabel("📱 CODE SMART TAG");
+        qrTitle->setStyleSheet("font-size: 16px; font-weight: bold; color: #495057; margin: 15px 0 10px 0;");
+        qrTitle->setAlignment(Qt::AlignCenter);
+        layout->addWidget(qrTitle);
+
+        QLabel *qrCodeLabel = new QLabel();
+        qrCodeLabel->setAlignment(Qt::AlignCenter);
+
+        QString smartTagData = genererSmartTagData(immatriculation);
+        QPixmap qrPixmap = generateQRCode(smartTagData, 250);
+
+        // Appliquer la couleur selon le statut
+        QString couleur = getCouleurStatutVehicule(immatriculation);
+        QString styleQR = "border: 3px solid ";
+
+        if (couleur == "ROUGE") styleQR += "#dc3545; background-color: #ffe6e6;";
+        else if (couleur == "ORANGE") styleQR += "#fd7e14; background-color: #fff3e0;";
+        else if (couleur == "JAUNE") styleQR += "#ffc107; background-color: #fffdf0;";
+        else if (couleur == "VERT") styleQR += "#28a745; background-color: #f0fff4;";
+        else styleQR += "#1976d2; background-color: #f0f8ff;";
+
+        styleQR += " padding: 15px; border-radius: 15px;";
+        qrCodeLabel->setPixmap(qrPixmap);
+        qrCodeLabel->setStyleSheet(styleQR);
+        layout->addWidget(qrCodeLabel);
+
+        // Légende couleur
+        QLabel *legendeLabel = new QLabel();
+        QString legendeText = "🎨 Légende: ";
+        if (couleur == "ROUGE") legendeText += "🔴 CRITIQUE - Assurance expirée";
+        else if (couleur == "ORANGE") legendeText += "🟠 URGENT - Action requise";
+        else if (couleur == "JAUNE") legendeText += "🟡 ATTENTION - Surveiller";
+        else if (couleur == "VERT") legendeText += "🟢 OPTIMAL - Tout est OK";
+        else legendeText += "🔵 INCONNU - Données manquantes";
+
+        legendeLabel->setText(legendeText);
+        legendeLabel->setStyleSheet("font-size: 12px; color: #6c757d; padding: 10px; background-color: #f8f9fa; border-radius: 5px;");
+        legendeLabel->setAlignment(Qt::AlignCenter);
+        layout->addWidget(legendeLabel);
+
+        // Données encodées (pour debug)
+        QTextEdit *dataPreview = new QTextEdit();
+        dataPreview->setPlainText("Données encodées dans le QR Code:\n\n" + smartTagData +
+                                  "\n\n📱 Ce code contient toutes les informations du véhicule " +
+                                  "et peut être scanné par l'application mobile Kia pour un accès rapide.");
+        dataPreview->setReadOnly(true);
+        dataPreview->setMaximumHeight(120);
+        dataPreview->setStyleSheet("font-family: monospace; font-size: 9px; border: 1px solid #dee2e6; border-radius: 5px; padding: 5px;");
+        layout->addWidget(dataPreview);
+
+    } else {
+        QLabel *errorLabel = new QLabel("❌ Erreur: Véhicule non trouvé dans la base de données");
+        errorLabel->setStyleSheet("color: #dc3545; font-weight: bold; padding: 20px;");
+        errorLabel->setAlignment(Qt::AlignCenter);
+        layout->addWidget(errorLabel);
+    }
+
+    // Boutons d'action
+    QHBoxLayout *buttonLayout = new QHBoxLayout();
+
+    QPushButton *btnImprimer = new QPushButton("🖨️ Imprimer Tag");
+    QPushButton *btnEnregistrer = new QPushButton("💾 Sauvegarder");
+    QPushButton *btnScanner = new QPushButton("📱 Simuler Scan");
+    QPushButton *btnFermer = new QPushButton("Fermer");
+
+    btnImprimer->setStyleSheet("QPushButton { background-color: #17a2b8; color: white; padding: 8px; border-radius: 5px; }");
+    btnEnregistrer->setStyleSheet("QPushButton { background-color: #28a745; color: white; padding: 8px; border-radius: 5px; }");
+    btnScanner->setStyleSheet("QPushButton { background-color: #6f42c1; color: white; padding: 8px; border-radius: 5px; }");
+    btnFermer->setStyleSheet("QPushButton { background-color: #6c757d; color: white; padding: 8px; border-radius: 5px; }");
+
+    connect(btnImprimer, &QPushButton::clicked, this, [this, immatriculation]() {
+        preparerImpressionSmartTag(immatriculation);
+    });
+
+    connect(btnEnregistrer, &QPushButton::clicked, this, [this, immatriculation]() {
+        sauvegarderSmartTag(immatriculation);
+    });
+
+    connect(btnScanner, &QPushButton::clicked, this, [this, immatriculation]() {
+        simulerScanSmartTag(immatriculation);
+    });
+
+    connect(btnFermer, &QPushButton::clicked, smartTagDialog, &QDialog::close);
+
+    buttonLayout->addWidget(btnImprimer);
+    buttonLayout->addWidget(btnEnregistrer);
+    buttonLayout->addWidget(btnScanner);
+    buttonLayout->addWidget(btnFermer);
+
+    layout->addLayout(buttonLayout);
+    smartTagDialog->exec();
+}
+
+void MainWindow::preparerImpressionSmartTag(const QString& immatriculation)
+{
+    QString smartTagData = genererSmartTagData(immatriculation);
+    QPixmap qrPixmap = generateQRCode(smartTagData, 300);
+
+    QDialog *printDialog = new QDialog(this);
+    printDialog->setWindowTitle("🖨️ Impression Smart Tag - " + immatriculation);
+    printDialog->setFixedSize(400, 500);
+
+    QVBoxLayout *layout = new QVBoxLayout(printDialog);
+
+    QLabel *title = new QLabel("Prêt pour l'impression");
+    title->setStyleSheet("font-size: 18px; font-weight: bold; color: #2c3e50; padding: 10px;");
+    title->setAlignment(Qt::AlignCenter);
+    layout->addWidget(title);
+
+    QLabel *instruction = new QLabel("Le Smart Tag est optimisé pour l'impression sur étiquette autocollante (50x50mm)");
+    instruction->setStyleSheet("color: #6c757d; padding: 10px; text-align: center;");
+    instruction->setWordWrap(true);
+    layout->addWidget(instruction);
+
+    QLabel *qrPreview = new QLabel();
+    qrPreview->setPixmap(qrPixmap);
+    qrPreview->setAlignment(Qt::AlignCenter);
+    qrPreview->setStyleSheet("border: 2px dashed #dee2e6; padding: 20px; border-radius: 10px;");
+    layout->addWidget(qrPreview);
+
+    QLabel *info = new QLabel("Immatriculation: " + immatriculation + "\n" +
+                              "Date de génération: " + QDateTime::currentDateTime().toString("dd/MM/yyyy HH:mm"));
+    info->setStyleSheet("font-family: monospace; background-color: #f8f9fa; padding: 10px; border-radius: 5px;");
+    info->setAlignment(Qt::AlignCenter);
+    layout->addWidget(info);
+
+    QDialogButtonBox *buttonBox = new QDialogButtonBox(QDialogButtonBox::Ok | QDialogButtonBox::Cancel);
+    connect(buttonBox, &QDialogButtonBox::accepted, printDialog, [this, immatriculation]() {
+        QMessageBox::information(this, "Impression", "Smart Tag envoyé à l'imprimante pour le véhicule: " + immatriculation);
+    });
+    connect(buttonBox, &QDialogButtonBox::rejected, printDialog, &QDialog::close);
+
+    layout->addWidget(buttonBox);
+    printDialog->exec();
+}
+
+void MainWindow::sauvegarderSmartTag(const QString& immatriculation)
+{
+    QString fileName = QFileDialog::getSaveFileName(this, "Sauvegarder Smart Tag",
+                                                    "SmartTag_" + immatriculation + ".png",
+                                                    "Images (*.png *.jpg)");
+
+    if (!fileName.isEmpty()) {
+        QString smartTagData = genererSmartTagData(immatriculation);
+        QPixmap qrPixmap = generateQRCode(smartTagData, 400);
+
+        if (qrPixmap.save(fileName)) {
+            QMessageBox::information(this, "Sauvegarde réussie",
+                                     "Smart Tag sauvegardé pour le véhicule: " + immatriculation +
+                                         "\nFichier: " + fileName);
+        } else {
+            QMessageBox::warning(this, "Erreur", "Impossible de sauvegarder le fichier.");
+        }
+    }
+}
+
+void MainWindow::simulerScanSmartTag(const QString& immatriculation)
+{
+    QDialog *scanDialog = new QDialog(this);
+    scanDialog->setWindowTitle("📱 Simulation Scan - " + immatriculation);
+    scanDialog->setFixedSize(450, 300);
+
+    QVBoxLayout *layout = new QVBoxLayout(scanDialog);
+
+    QLabel *title = new QLabel("📱 SCAN SMART TAG SIMULÉ");
+    title->setStyleSheet("font-size: 18px; font-weight: bold; color: #2c3e50; padding: 15px; background-color: #e3f2fd; border-radius: 10px;");
+    title->setAlignment(Qt::AlignCenter);
+    layout->addWidget(title);
+
+    // Récupérer les données du véhicule
+    QSqlQuery query;
+    query.prepare("SELECT * FROM VEHICULE WHERE IMMATRICULATION = :immat");
+    query.bindValue(":immat", immatriculation);
+
+    if (query.exec() && query.next()) {
+        QString modele = query.value("MODÈLE_DU_VEHICLE").toString();
+        QString kilometrage = query.value("KILOMÉTRAGE").toString();
+        QDate dateAssurance = query.value("DATE_ASSURANCE").toDate();
+        QString etat = query.value("ÉTAT").toString();
+
+        QTextEdit *scanResult = new QTextEdit();
+        scanResult->setReadOnly(true);
+
+        QString resultText = "🔍 **RÉSULTAT DU SCAN**\n\n";
+        resultText += "✅ **Véhicule identifié avec succès**\n\n";
+        resultText += "🚗 **Informations véhicule:**\n";
+        resultText += "• Immatriculation: " + immatriculation + "\n";
+        resultText += "• Modèle: " + modele + "\n";
+        resultText += "• Kilométrage: " + kilometrage + " km\n";
+        resultText += "• État: " + etat + "\n\n";
+
+        if (dateAssurance.isValid()) {
+            int joursRestants = QDate::currentDate().daysTo(dateAssurance);
+            resultText += "📅 **Assurance:** " + dateAssurance.toString("dd/MM/yyyy") + "\n";
+            resultText += "⏱️ **Jours restants:** " + QString::number(joursRestants) + " jours\n\n";
+
+            if (joursRestants < 0) {
+                resultText += "🚨 **ALERTE CRITIQUE:** Assurance EXPIRÉE!\n";
+                resultText += "📍 **Action requise:** Renouvellement immédiat\n";
+            } else if (joursRestants <= 7) {
+                resultText += "⚠️ **ALERTE URGENTE:** Assurance expire bientôt!\n";
+                resultText += "📍 **Action recommandée:** Planifier renouvellement\n";
+            } else if (joursRestants <= 30) {
+                resultText += "📋 **RAPPEL:** Assurance à renouveler prochainement\n";
+            } else {
+                resultText += "✅ **STATUT:** Assurance valide\n";
+            }
+        }
+
+        resultText += "\n---\n";
+        resultText += "🕒 Scan simulé le: " + QDateTime::currentDateTime().toString("dd/MM/yyyy HH:mm:ss");
+
+        scanResult->setMarkdown(resultText);
+        layout->addWidget(scanResult);
+
+    } else {
+        QLabel *errorLabel = new QLabel("❌ Erreur lors de la simulation du scan");
+        errorLabel->setStyleSheet("color: #dc3545; font-weight: bold; padding: 20px;");
+        errorLabel->setAlignment(Qt::AlignCenter);
+        layout->addWidget(errorLabel);
+    }
+
+    QDialogButtonBox *buttonBox = new QDialogButtonBox(QDialogButtonBox::Close);
+    connect(buttonBox, &QDialogButtonBox::rejected, scanDialog, &QDialog::close);
+    layout->addWidget(buttonBox);
+
+    scanDialog->exec();
+}
+
+void MainWindow::on_btnQRCode_clicked()
+{
+    genererQRCode();
+}
+
+void MainWindow::genererQRCode()
+{
+    qDebug() << "Génération du QR Code Kia...";
+
+    QDialog *qrDialog = new QDialog(this);
+    qrDialog->setWindowTitle("QR Code Kia France");
+    qrDialog->setFixedSize(400, 500);
+
+    QVBoxLayout *layout = new QVBoxLayout(qrDialog);
+
+    QLabel *titleLabel = new QLabel("📱 QR CODE KIA FRANCE");
+    titleLabel->setStyleSheet("font-size: 18px; font-weight: bold; color: #2c3e50; padding: 15px; background-color: #e3f2fd; border-radius: 10px;");
+    titleLabel->setAlignment(Qt::AlignCenter);
+    layout->addWidget(titleLabel);
+
+    QLabel *qrVisual = new QLabel();
+    qrVisual->setAlignment(Qt::AlignCenter);
+
+    QString kiaUrl = "https://www.kia.com/fr/";
+    QPixmap qrPixmap = generateQRCode(kiaUrl, 250);
+    qrVisual->setPixmap(qrPixmap);
+    qrVisual->setStyleSheet("border: 2px solid #3498db; padding: 10px; border-radius: 10px; background-color: white;");
+    layout->addWidget(qrVisual);
+
+    QLabel *instructions = new QLabel("📱 Scannez pour visiter le site Kia France");
+    instructions->setStyleSheet("font-size: 14px; color: #7f8c8d; padding: 10px; font-weight: bold;");
+    instructions->setAlignment(Qt::AlignCenter);
+    layout->addWidget(instructions);
+
+    QTextEdit *urlPreview = new QTextEdit();
+    QString previewText = "Contenu du QR Code (URL):\n\n" + kiaUrl +
+                          "\n\n📱 Quand vous scannez, votre téléphone ouvrira le site Kia France dans le navigateur.";
+
+    urlPreview->setPlainText(previewText);
+    urlPreview->setReadOnly(true);
+    urlPreview->setMaximumHeight(100);
+    urlPreview->setStyleSheet("font-family: Arial; font-size: 10px; border: 1px solid #bdc3c7; border-radius: 5px; padding: 5px;");
+    layout->addWidget(urlPreview);
+
+    QDialogButtonBox *buttonBox = new QDialogButtonBox(QDialogButtonBox::Close);
+    connect(buttonBox, &QDialogButtonBox::rejected, qrDialog, &QDialog::reject);
+    layout->addWidget(buttonBox);
+
+    qrDialog->exec();
+}
+
+// === SYSTÈME DE NOTIFICATION AVEC ICÔNE ===
+void MainWindow::setupTrayIcon()
+{
+    trayIcon = new QSystemTrayIcon(this);
+    trayMenu = new QMenu(this);
+
+    QAction *restoreAction = new QAction("&Ouvrir", this);
+    QAction *notificationAction = new QAction("&Voir alertes", this);
+    QAction *quitAction = new QAction("&Quitter", this);
+
+    connect(restoreAction, &QAction::triggered, this, &MainWindow::on_restore_window);
+    connect(notificationAction, &QAction::triggered, this, &MainWindow::on_pushButton_alertes_clicked);
+    connect(quitAction, &QAction::triggered, this, &MainWindow::on_quit_application);
+
+    trayMenu->addAction(restoreAction);
+    trayMenu->addAction(notificationAction);
+    trayMenu->addSeparator();
+    trayMenu->addAction(quitAction);
+
+    trayIcon->setContextMenu(trayMenu);
+    updateTrayIcon();
+
+    connect(trayIcon, &QSystemTrayIcon::activated, this, &MainWindow::on_trayIcon_activated);
+    connect(trayIcon, &QSystemTrayIcon::messageClicked, this, &MainWindow::on_show_notification);
+
+    trayIcon->show();
+}
+
+void MainWindow::updateTrayIcon()
+{
+    QIcon icon;
+
+    if (alertCount > 0) {
+        QPixmap pixmap(32, 32);
+        pixmap.fill(Qt::transparent);
+
+        QPainter painter(&pixmap);
+        painter.setRenderHint(QPainter::Antialiasing);
+
+        painter.setBrush(QBrush(QColor(255, 0, 0)));
+        painter.setPen(Qt::NoPen);
+        painter.drawEllipse(0, 0, 32, 32);
+
+        painter.setPen(QPen(Qt::white));
+        painter.setFont(QFont("Arial", 12, QFont::Bold));
+
+        QString alertText = alertCount > 9 ? "9+" : QString::number(alertCount);
+        painter.drawText(pixmap.rect(), Qt::AlignCenter, alertText);
+
+        icon = QIcon(pixmap);
+        trayIcon->setToolTip(QString("Gestion Véhicules - %1 alerte(s)").arg(alertCount));
+    } else {
+        icon = QApplication::style()->standardIcon(QStyle::SP_ComputerIcon);
+        trayIcon->setToolTip("Gestion Véhicules - Aucune alerte");
+    }
+
+    trayIcon->setIcon(icon);
+}
+
+void MainWindow::showTrayNotification(const QString &title, const QString &message, int alertLevel)
+{
+    if (!trayIcon->isVisible()) return;
+
+    QSystemTrayIcon::MessageIcon icon = QSystemTrayIcon::Information;
+
+    switch(alertLevel) {
+    case 0: icon = QSystemTrayIcon::Information; break;
+    case 1: icon = QSystemTrayIcon::Warning; break;
+    case 2: icon = QSystemTrayIcon::Critical; break;
+    }
+
+    trayIcon->showMessage(title, message, icon, 10000);
+
+    if (alertLevel > 0) {
+        alertCount++;
+        updateTrayIcon();
+    }
+}
+
+void MainWindow::on_trayIcon_activated(QSystemTrayIcon::ActivationReason reason)
+{
+    switch (reason) {
+    case QSystemTrayIcon::DoubleClick:
+    case QSystemTrayIcon::Trigger:
+        on_restore_window();
+        break;
+    case QSystemTrayIcon::MiddleClick:
+        on_pushButton_alertes_clicked();
+        break;
+    default:
+        break;
+    }
+}
+
+void MainWindow::on_show_notification()
+{
+    on_pushButton_alertes_clicked();
+}
+
+void MainWindow::on_hide_window()
+{
+    this->hide();
+    showTrayNotification("Gestion Véhicules",
+                         "L'application continue de fonctionner en arrière-plan.\nCliquez sur l'icône pour rouvrir.",
+                         0);
+}
+
+void MainWindow::on_restore_window()
+{
+    this->show();
+    this->raise();
+    this->activateWindow();
+    alertCount = 0;
+    updateTrayIcon();
+}
+
+void MainWindow::on_quit_application()
+{
+    trayIcon->hide();
+    QApplication::quit();
+}
+
+// === NOTIFICATION PAR BOUTON Vehicule_6 ===
+void MainWindow::on_Vehicule_6_clicked()
+{
+    qDebug() << "=== BOUTON Vehicule_6 CLIQUE ===";
+    verifierAssurances30Jours();
+    QTimer::singleShot(1000, this, &MainWindow::on_pushButton_alertes_clicked);
+    showTrayNotification("🔔 Vérification Manuelle",
+                         "Scan des assurances déclenché manuellement\nRésultats dans l'interface alertes",
+                         0);
+}
+
+// === FONCTIONS GESTION VÉHICULES ===
+void MainWindow::chargerTousLesVehicules() {
+    QSqlQuery query("SELECT IMMATRICULATION, MODÈLE_DU_VEHICLE, KILOMÉTRAGE, DATE_ASSURANCE, ÉTAT, TEMPERATURE FROM VEHICULE ORDER BY IMMATRICULATION");
     ui->tab->setRowCount(0);
 
     while (query.next()) {
         int row = ui->tab->rowCount();
         ui->tab->insertRow(row);
 
-        // Colonne 0: Immatriculation
         ui->tab->setItem(row, 0, new QTableWidgetItem(query.value(0).toString()));
-        // Colonne 1: Modèle
         ui->tab->setItem(row, 1, new QTableWidgetItem(query.value(1).toString()));
-        // Colonne 2: Kilométrage
         ui->tab->setItem(row, 2, new QTableWidgetItem(query.value(2).toString()));
 
-        // Colonne 3: Date assurance (formatée)
         QString dateText = "";
         if (!query.value(3).isNull()) {
             QDate date = query.value(3).toDate();
@@ -116,32 +1062,36 @@ void MainWindow::chargerTousLesVehicules() {
         }
         ui->tab->setItem(row, 3, new QTableWidgetItem(dateText));
 
-        // Colonne 4: État
         ui->tab->setItem(row, 4, new QTableWidgetItem(query.value(4).toString()));
+
+        QString temperature = "";
+        if (!query.value(5).isNull()) {
+            temperature = QString::number(query.value(5).toInt()) + "°C";
+        }
+        ui->tab->setItem(row, 5, new QTableWidgetItem(temperature));
     }
+
+    qDebug() << "Véhicules chargés:" << ui->tab->rowCount();
 }
 
 void MainWindow::on_ajouter_clicked()
 {
-    QString imm = ui->Immatriculation_3->text();
-    QString modele = ui->mo->text();
-    QString kilometrage = ui->kilo->text();
-    QString dateText = ui->date_3->text();
-    QString etat = ui->ett->text();
-
-    // === VALIDATIONS ===
+    QString imm = ui->Immatriculation_3->text().trimmed().toUpper();
+    QString modele = ui->mo->text().trimmed();
+    QString kilometrage = ui->kilo->text().trimmed();
+    QString dateText = ui->date_3->text().trimmed();
+    QString etat = ui->ett->text().trimmed();
 
     // Validation immatriculation
     if (imm.isEmpty()) {
-        QMessageBox::warning(this,"Attention","Immatriculation vide !");
+        QMessageBox::warning(this, "Attention", "Immatriculation vide !");
         ui->Immatriculation_3->setFocus();
         return;
     }
 
-    QRegularExpression immatRegex("^[A-Z]{2}-\\d{3}-[A-Z]{2}$|^\\d{3}-[A-Z]{2}-\\d{4}$");
-    QRegularExpressionMatch match = immatRegex.match(imm);
-    if (!match.hasMatch()) {
-        QMessageBox::warning(this,"Erreur","Format d'immatriculation invalide!\nExemples: AB-123-CD ou 123-AB-1200");
+    QRegularExpression immatRegex("^[A-Z]{2}-\\d{3}-[A-Z]{2}$|^\\d{3,4}-[A-Z]{2}-\\d{3,4}$");
+    if (!immatRegex.match(imm).hasMatch()) {
+        QMessageBox::warning(this, "Erreur", "Format d'immatriculation invalide!");
         ui->Immatriculation_3->setFocus();
         return;
     }
@@ -151,7 +1101,7 @@ void MainWindow::on_ajouter_clicked()
         bool ok;
         int km = kilometrage.toInt(&ok);
         if (!ok || km < 0 || km > 9999999) {
-            QMessageBox::warning(this,"Erreur","Kilométrage invalide!\nDoit être entre 0 et 9 999 999");
+            QMessageBox::warning(this, "Erreur", "Kilométrage invalide!");
             ui->kilo->setFocus();
             return;
         }
@@ -160,471 +1110,999 @@ void MainWindow::on_ajouter_clicked()
     // Validation date
     if (!dateText.isEmpty()) {
         QRegularExpression dateRegex("^(0[1-9]|[12][0-9]|3[01])/(0[1-9]|1[0-2])/\\d{4}$");
-        QRegularExpressionMatch dateMatch = dateRegex.match(dateText);
-        if (!dateMatch.hasMatch()) {
-            QMessageBox::warning(this,"Erreur","Format de date invalide!\nFormat requis: JJ/MM/AAAA");
+        if (!dateRegex.match(dateText).hasMatch()) {
+            QMessageBox::warning(this, "Erreur", "Format de date invalide!");
             ui->date_3->setFocus();
             return;
         }
 
         QDate date = QDate::fromString(dateText, "dd/MM/yyyy");
         if (!date.isValid()) {
-            QMessageBox::warning(this,"Erreur","Date invalide!");
-            ui->date_3->setFocus();
-            return;
-        }
-        if (date < QDate::currentDate()) {
-            QMessageBox::warning(this,"Erreur","Date passée non autorisée!\nLa date doit être >= aujourd'hui");
+            QMessageBox::warning(this, "Erreur", "Date invalide!");
             ui->date_3->setFocus();
             return;
         }
     }
 
-    // Validation modèle
-    if (modele.length() > 20) {
-        QMessageBox::warning(this,"Erreur","Modèle trop long!\nMaximum 20 caractères");
-        ui->mo->setFocus();
-        return;
-    }
-
-    // Validation état
-    if (etat.length() > 20) {
-        QMessageBox::warning(this,"Erreur","État trop long!\nMaximum 20 caractères");
-        ui->ett->setFocus();
-        return;
-    }
-
-    // === DÉTERMINER SI C'EST UN AJOUT OU UNE MODIFICATION ===
+    // AJOUT/MODIFICATION
     QModelIndexList selectedIndexes = ui->tab->selectionModel()->selectedIndexes();
     bool isModification = !selectedIndexes.isEmpty();
 
     QSqlQuery query;
 
     if (isModification) {
-        // MODE MODIFICATION
         int row = selectedIndexes.first().row();
-        QString immOriginal = ui->tab->item(row, 0)->text(); // Utiliser l'immatriculation comme clé
-
+        QString immOriginal = ui->tab->item(row, 0)->text();
         query.prepare("UPDATE VEHICULE SET IMMATRICULATION = :imm, MODÈLE_DU_VEHICLE = :modele, KILOMÉTRAGE = :km, DATE_ASSURANCE = :date_ass, ÉTAT = :etat WHERE IMMATRICULATION = :imm_original");
         query.bindValue(":imm_original", immOriginal);
     } else {
-        // MODE AJOUT
-        query.prepare("INSERT INTO VEHICULE (IMMATRICULATION, MODÈLE_DU_VEHICLE, KILOMÉTRAGE, DATE_ASSURANCE, ÉTAT) VALUES (:imm, :modele, :km, :date_ass, :etat)");
+        query.prepare("INSERT INTO VEHICULE (IMMATRICULATION, MODÈLE_DU_VEHICLE, KILOMÉTRAGE, DATE_ASSURANCE, ÉTAT, TEMPERATURE) VALUES (:imm, :modele, :km, :date_ass, :etat, NULL)");
     }
 
     query.bindValue(":imm", imm);
     query.bindValue(":modele", modele);
+    query.bindValue(":km", kilometrage.isEmpty() ? QVariant() : kilometrage.toInt());
 
-    // Gestion du kilométrage
-    if (kilometrage.isEmpty()) {
-        query.bindValue(":km", QVariant(QVariant::Int));
-    } else {
-        query.bindValue(":km", kilometrage.toInt());
-    }
-
-    // Gestion de la date d'assurance
     if (dateText.isEmpty()) {
-        query.bindValue(":date_ass", QVariant(QVariant::Date));
+        query.bindValue(":date_ass", QVariant());
     } else {
-        QDate dateAssurance = QDate::fromString(dateText, "dd/MM/yyyy");
-        query.bindValue(":date_ass", dateAssurance);
+        query.bindValue(":date_ass", QDate::fromString(dateText, "dd/MM/yyyy"));
     }
 
-    // Gestion de l'état
-    if (etat.isEmpty()) {
-        query.bindValue(":etat", QVariant(QVariant::String));
-    } else {
-        query.bindValue(":etat", etat);
-    }
+    query.bindValue(":etat", etat.isEmpty() ? QVariant() : etat);
 
     if (query.exec()) {
-        QString message = isModification ? "✅ Véhicule modifié dans la base !" : "✅ Véhicule ajouté dans la base !";
+        QString message = isModification ? "Véhicule modifié avec succès !" : "Véhicule ajouté avec succès !";
         QMessageBox::information(this, "Succès", message);
 
-        // Recharger tous les véhicules pour mettre à jour le tableau
         chargerTousLesVehicules();
-
-        // Vider les champs après opération
         ui->Immatriculation_3->clear();
         ui->mo->clear();
         ui->kilo->clear();
         ui->date_3->clear();
         ui->ett->clear();
-
-        // Désélectionner la ligne
         ui->tab->clearSelection();
 
+        QTimer::singleShot(500, this, &MainWindow::verifierAlertesAssurance);
+
     } else {
-        QMessageBox::critical(this, "Erreur", "❌ Opération échouée : " + query.lastError().text());
+        if (query.lastError().text().contains("unique", Qt::CaseInsensitive)) {
+            QMessageBox::warning(this, "Erreur", "Cette immatriculation existe déjà !");
+        } else {
+            QMessageBox::critical(this, "Erreur", "Opération échouée : " + query.lastError().text());
+        }
     }
 }
 
-// Fonction pour le bouton Annuler
 void MainWindow::on_annuler_7_clicked()
 {
-    // Vider tous les champs de saisie
     ui->Immatriculation_3->clear();
     ui->mo->clear();
     ui->kilo->clear();
     ui->date_3->clear();
     ui->ett->clear();
-
-    // Désélectionner la ligne du tableau
     ui->tab->clearSelection();
-
-    // Remettre le focus sur le premier champ
     ui->Immatriculation_3->setFocus();
-
-    QMessageBox::information(this, "Annulation", "Tous les champs ont été vidés.");
 }
 
-// Fonction pour le bouton Modifier
 void MainWindow::on_modifier_5_clicked()
 {
-    // Vérifier si une ligne est sélectionnée dans le tableau
     QModelIndexList selectedIndexes = ui->tab->selectionModel()->selectedIndexes();
     if (selectedIndexes.isEmpty()) {
-        QMessageBox::warning(this, "Attention", "Veuillez sélectionner un véhicule à modifier dans le tableau.");
+        QMessageBox::warning(this, "Attention", "Veuillez sélectionner un véhicule à modifier.");
         return;
     }
 
-    // Récupérer la ligne sélectionnée
     int row = selectedIndexes.first().row();
+    ui->Immatriculation_3->setText(ui->tab->item(row, 0)->text());
+    ui->mo->setText(ui->tab->item(row, 1)->text());
+    ui->kilo->setText(ui->tab->item(row, 2)->text());
+    ui->date_3->setText(ui->tab->item(row, 3)->text());
+    ui->ett->setText(ui->tab->item(row, 4)->text());
 
-    // Récupérer les données de la ligne sélectionnée
-    QString imm = ui->tab->item(row, 0)->text();
-    QString modele = ui->tab->item(row, 1)->text();
-    QString kilometrage = ui->tab->item(row, 2)->text();
-    QString dateText = ui->tab->item(row, 3)->text();
-    QString etat = ui->tab->item(row, 4)->text();
-
-    // Remplir les champs avec les données à modifier
-    ui->Immatriculation_3->setText(imm);
-    ui->mo->setText(modele);
-    ui->kilo->setText(kilometrage);
-    ui->date_3->setText(dateText);
-    ui->ett->setText(etat);
-
-    QMessageBox::information(this, "Modification", "Véhicule chargé pour modification.\nModifiez les champs et cliquez sur Ajouter pour sauvegarder.");
+    QMessageBox::information(this, "Modification", "Véhicule chargé pour modification.");
 }
 
-// Fonction pour le bouton Valider (Recherche par immatriculation)
 void MainWindow::on_valider_clicked()
 {
-    QString immRecherche = ui->identifant_5->text().trimmed();
+    QString immRecherche = ui->identifant_5->text().trimmed().toUpper();
 
-    // Vérifier si l'immatriculation est vide
     if (immRecherche.isEmpty()) {
         QMessageBox::warning(this, "Attention", "Veuillez entrer une immatriculation à rechercher.");
         ui->identifant_5->setFocus();
         return;
     }
 
-    // DEBUG: Afficher la recherche
-    qDebug() << "Recherche de l'immatriculation:" << immRecherche;
-
-    // Recherche SIMPLE et DIRECTE dans la base de données
     QSqlQuery query;
-    query.prepare("SELECT IMMATRICULATION, MODÈLE_DU_VEHICLE, KILOMÉTRAGE, DATE_ASSURANCE, ÉTAT FROM VEHICULE WHERE IMMATRICULATION = :imm");
+    query.prepare("SELECT IMMATRICULATION, MODÈLE_DU_VEHICLE, KILOMÉTRAGE, DATE_ASSURANCE, ÉTAT, TEMPERATURE FROM VEHICULE WHERE IMMATRICULATION = :imm");
     query.bindValue(":imm", immRecherche);
 
-    if (query.exec()) {
-        if (query.next()) {
-            // Véhicule trouvé, afficher les données
-            QString imm = query.value(0).toString();
-            QString modele = query.value(1).toString();
-            QString kilometrage = query.value(2).toString();
-            QString dateAssurance = query.value(3).toString();
-            QString etat = query.value(4).toString();
+    if (query.exec() && query.next()) {
+        ui->tab->setRowCount(0);
+        int row = ui->tab->rowCount();
+        ui->tab->insertRow(row);
 
-            // Formater la date si elle n'est pas NULL
-            QString dateText = "";
-            if (!query.value(3).isNull()) {
-                QDate date = query.value(3).toDate();
-                dateText = date.toString("dd/MM/yyyy");
-            }
+        ui->tab->setItem(row, 0, new QTableWidgetItem(query.value(0).toString()));
+        ui->tab->setItem(row, 1, new QTableWidgetItem(query.value(1).toString()));
+        ui->tab->setItem(row, 2, new QTableWidgetItem(query.value(2).toString()));
 
-            // Vider le tableau et afficher seulement le véhicule trouvé
+        QString dateText = "";
+        if (!query.value(3).isNull()) {
+            dateText = query.value(3).toDate().toString("dd/MM/yyyy");
+        }
+        ui->tab->setItem(row, 3, new QTableWidgetItem(dateText));
+        ui->tab->setItem(row, 4, new QTableWidgetItem(query.value(4).toString()));
+
+        QString temperature = "";
+        if (!query.value(5).isNull()) {
+            temperature = QString::number(query.value(5).toInt()) + "°C";
+        }
+        ui->tab->setItem(row, 5, new QTableWidgetItem(temperature));
+
+        ui->tab->selectRow(row);
+        QMessageBox::information(this, "Recherche", "Véhicule trouvé !");
+
+    } else {
+        // Recherche partielle
+        QSqlQuery queryPartiel;
+        queryPartiel.prepare("SELECT IMMATRICULATION, MODÈLE_DU_VEHICLE, KILOMÉTRAGE, DATE_ASSURANCE, ÉTAT, TEMPERATURE FROM VEHICULE WHERE IMMATRICULATION LIKE :imm");
+        queryPartiel.bindValue(":imm", "%" + immRecherche + "%");
+
+        if (queryPartiel.exec()) {
             ui->tab->setRowCount(0);
-            int row = ui->tab->rowCount();
-            ui->tab->insertRow(row);
-            ui->tab->setItem(row, 0, new QTableWidgetItem(imm));
-            ui->tab->setItem(row, 1, new QTableWidgetItem(modele));
-            ui->tab->setItem(row, 2, new QTableWidgetItem(kilometrage));
-            ui->tab->setItem(row, 3, new QTableWidgetItem(dateText));
-            ui->tab->setItem(row, 4, new QTableWidgetItem(etat));
+            int count = 0;
 
-            // Sélectionner la ligne affichée
-            ui->tab->selectRow(row);
-
-            QMessageBox::information(this, "Recherche", "✅ Véhicule trouvé !");
-
-        } else {
-            // Aucun véhicule trouvé - essayer une recherche partielle
-            QSqlQuery queryPartiel;
-            queryPartiel.prepare("SELECT IMMATRICULATION, MODÈLE_DU_VEHICLE, KILOMÉTRAGE, DATE_ASSURANCE, ÉTAT FROM VEHICULE WHERE IMMATRICULATION LIKE :imm");
-            queryPartiel.bindValue(":imm", "%" + immRecherche + "%");
-
-            if (queryPartiel.exec() && queryPartiel.next()) {
-                // Véhicule trouvé avec recherche partielle
-                QString imm = queryPartiel.value(0).toString();
-                QString modele = queryPartiel.value(1).toString();
-                QString kilometrage = queryPartiel.value(2).toString();
-                QString dateAssurance = queryPartiel.value(3).toString();
-                QString etat = queryPartiel.value(4).toString();
-
-                // Formater la date
-                QString dateText = "";
-                if (!queryPartiel.value(3).isNull()) {
-                    QDate date = queryPartiel.value(3).toDate();
-                    dateText = date.toString("dd/MM/yyyy");
-                }
-
-                // Vider le tableau et afficher le véhicule trouvé
-                ui->tab->setRowCount(0);
+            while (queryPartiel.next()) {
                 int row = ui->tab->rowCount();
                 ui->tab->insertRow(row);
-                ui->tab->setItem(row, 0, new QTableWidgetItem(imm));
-                ui->tab->setItem(row, 1, new QTableWidgetItem(modele));
-                ui->tab->setItem(row, 2, new QTableWidgetItem(kilometrage));
-                ui->tab->setItem(row, 3, new QTableWidgetItem(dateText));
-                ui->tab->setItem(row, 4, new QTableWidgetItem(etat));
 
-                ui->tab->selectRow(row);
-                QMessageBox::information(this, "Recherche", "✅ Véhicule trouvé (recherche partielle) !");
+                ui->tab->setItem(row, 0, new QTableWidgetItem(queryPartiel.value(0).toString()));
+                ui->tab->setItem(row, 1, new QTableWidgetItem(queryPartiel.value(1).toString()));
+                ui->tab->setItem(row, 2, new QTableWidgetItem(queryPartiel.value(2).toString()));
+
+                QString dateText = "";
+                if (!queryPartiel.value(3).isNull()) {
+                    dateText = queryPartiel.value(3).toDate().toString("dd/MM/yyyy");
+                }
+                ui->tab->setItem(row, 3, new QTableWidgetItem(dateText));
+                ui->tab->setItem(row, 4, new QTableWidgetItem(queryPartiel.value(4).toString()));
+
+                QString temperature = "";
+                if (!queryPartiel.value(5).isNull()) {
+                    temperature = QString::number(queryPartiel.value(5).toInt()) + "°C";
+                }
+                ui->tab->setItem(row, 5, new QTableWidgetItem(temperature));
+
+                count++;
+            }
+
+            if (count > 0) {
+                QMessageBox::information(this, "Recherche", QString("%1 véhicule(s) trouvé(s)").arg(count));
             } else {
-                // Aucun véhicule trouvé du tout
-                QMessageBox::warning(this, "Recherche", "❌ Aucun véhicule trouvé avec cette immatriculation: " + immRecherche);
-                // Recharger tous les véhicules
+                QMessageBox::warning(this, "Recherche", "Aucun véhicule trouvé.");
                 chargerTousLesVehicules();
             }
+        } else {
+            QMessageBox::warning(this, "Recherche", "Aucun véhicule trouvé.");
+            chargerTousLesVehicules();
         }
-    } else {
-        QMessageBox::critical(this, "Erreur", "❌ Erreur lors de la recherche : " + query.lastError().text());
     }
 }
 
-// Fonction pour le bouton Supprimer
 void MainWindow::on_Supprimer_5_clicked()
 {
-    // Vérifier si une ligne est sélectionnée dans le tableau
     QModelIndexList selectedIndexes = ui->tab->selectionModel()->selectedIndexes();
     if (selectedIndexes.isEmpty()) {
-        QMessageBox::warning(this, "Attention", "Veuillez sélectionner un véhicule à supprimer dans le tableau.");
+        QMessageBox::warning(this, "Attention", "Veuillez sélectionner un véhicule à supprimer.");
         return;
     }
 
-    // Récupérer la ligne sélectionnée
     int row = selectedIndexes.first().row();
     QString imm = ui->tab->item(row, 0)->text();
     QString modele = ui->tab->item(row, 1)->text();
 
-    // Demander confirmation à l'utilisateur
-    QMessageBox::StandardButton reply;
-    reply = QMessageBox::question(this, "Confirmation de suppression",
-                                  QString("Êtes-vous sûr de vouloir supprimer le véhicule :\n"
-                                          "Immatriculation: %1\n"
-                                          "Modèle: %2\n\n"
-                                          "Cette action est irréversible !")
-                                      .arg(imm).arg(modele),
-                                  QMessageBox::Yes | QMessageBox::No);
+    QMessageBox::StandardButton reply = QMessageBox::question(this, "Confirmation",
+                                                              QString("Supprimer le véhicule:\n%1 - %2?").arg(imm).arg(modele),
+                                                              QMessageBox::Yes | QMessageBox::No);
 
     if (reply == QMessageBox::Yes) {
-        // Supprimer de la base de données
         QSqlQuery query;
         query.prepare("DELETE FROM VEHICULE WHERE IMMATRICULATION = :imm");
         query.bindValue(":imm", imm);
 
         if (query.exec()) {
-            // Recharger tous les véhicules
             chargerTousLesVehicules();
-
-            // Vider les champs de saisie
             ui->Immatriculation_3->clear();
             ui->mo->clear();
             ui->kilo->clear();
             ui->date_3->clear();
             ui->ett->clear();
-
-            QMessageBox::information(this, "Suppression", "✅ Véhicule supprimé avec succès !");
+            QMessageBox::information(this, "Suppression", "Véhicule supprimé avec succès !");
+            QTimer::singleShot(500, this, &MainWindow::verifierAlertesAssurance);
         } else {
-            QMessageBox::critical(this, "Erreur", "❌ Erreur lors de la suppression : " + query.lastError().text());
+            QMessageBox::critical(this, "Erreur", "Erreur lors de la suppression : " + query.lastError().text());
         }
     }
 }
 
-// Fonction pour le tri via ComboBox
 void MainWindow::on_comboBox_5_currentTextChanged(const QString &arg1)
 {
-    // Par défaut, utiliser le tri ascendant quand on change le critère
-    QString orderBy;
-
-    if (arg1 == "Kilométrage") {
-        orderBy = "KILOMÉTRAGE ASC";
-    } else if (arg1 == "État") {
-        orderBy = "ÉTAT ASC";
-    } else if (arg1 == "Date assurance") {
-        orderBy = "DATE_ASSURANCE ASC";
-    } else {
-        // "Trier par..." ou autre - tri par défaut par immatriculation
+    if (arg1 == "Trier par...") {
         chargerTousLesVehicules();
         return;
     }
 
-    QSqlQuery query;
-    QString sql = QString("SELECT IMMATRICULATION, MODÈLE_DU_VEHICLE, KILOMÉTRAGE, DATE_ASSURANCE, ÉTAT FROM VEHICULE ORDER BY %1").arg(orderBy);
-
-    if (query.exec(sql)) {
-        ui->tab->setRowCount(0);
-
-        while (query.next()) {
-            int row = ui->tab->rowCount();
-            ui->tab->insertRow(row);
-
-            ui->tab->setItem(row, 0, new QTableWidgetItem(query.value(0).toString()));
-            ui->tab->setItem(row, 1, new QTableWidgetItem(query.value(1).toString()));
-            ui->tab->setItem(row, 2, new QTableWidgetItem(query.value(2).toString()));
-
-            // Formater la date
-            QString dateText = "";
-            if (!query.value(3).isNull()) {
-                QDate date = query.value(3).toDate();
-                dateText = date.toString("dd/MM/yyyy");
-            }
-            ui->tab->setItem(row, 3, new QTableWidgetItem(dateText));
-
-            ui->tab->setItem(row, 4, new QTableWidgetItem(query.value(4).toString()));
-        }
-
-    } else {
-        QMessageBox::critical(this, "Erreur", "❌ Erreur lors du tri : " + query.lastError().text());
-    }
-}
-
-// Fonction pour le tri ascendant (pushButton_19)
-void MainWindow::on_pushButton_19_clicked()
-{
-    // Récupérer le critère de tri actuel du ComboBox
-    QString critereTri = ui->comboBox_5->currentText();
     QString orderBy;
+    if (arg1 == "Immatriculation") orderBy = "IMMATRICULATION ASC";
+    else if (arg1 == "Kilométrage") orderBy = "KILOMÉTRAGE ASC";
+    else if (arg1 == "État") orderBy = "ÉTAT ASC";
+    else if (arg1 == "Date assurance") orderBy = "DATE_ASSURANCE ASC";
+    else if (arg1 == "Température") orderBy = "TEMPERATURE ASC";
+    else return;
 
-    if (critereTri == "Kilométrage") {
-        orderBy = "KILOMÉTRAGE ASC";
-    } else if (critereTri == "État") {
-        orderBy = "ÉTAT ASC";
-    } else if (critereTri == "Date assurance") {
-        orderBy = "DATE_ASSURANCE ASC";
-    } else {
-        // Tri par défaut par immatriculation
-        orderBy = "IMMATRICULATION ASC";
-    }
+    QSqlQuery query(QString("SELECT IMMATRICULATION, MODÈLE_DU_VEHICLE, KILOMÉTRAGE, DATE_ASSURANCE, ÉTAT, TEMPERATURE FROM VEHICULE ORDER BY %1").arg(orderBy));
 
-    // Exécuter la requête avec l'ordre ascendant
-    QSqlQuery query;
-    QString sql = QString("SELECT IMMATRICULATION, MODÈLE_DU_VEHICLE, KILOMÉTRAGE, DATE_ASSURANCE, ÉTAT FROM VEHICULE ORDER BY %1").arg(orderBy);
+    ui->tab->setRowCount(0);
+    while (query.next()) {
+        int row = ui->tab->rowCount();
+        ui->tab->insertRow(row);
+        ui->tab->setItem(row, 0, new QTableWidgetItem(query.value(0).toString()));
+        ui->tab->setItem(row, 1, new QTableWidgetItem(query.value(1).toString()));
+        ui->tab->setItem(row, 2, new QTableWidgetItem(query.value(2).toString()));
 
-    if (query.exec(sql)) {
-        ui->tab->setRowCount(0);
-
-        while (query.next()) {
-            int row = ui->tab->rowCount();
-            ui->tab->insertRow(row);
-
-            ui->tab->setItem(row, 0, new QTableWidgetItem(query.value(0).toString()));
-            ui->tab->setItem(row, 1, new QTableWidgetItem(query.value(1).toString()));
-            ui->tab->setItem(row, 2, new QTableWidgetItem(query.value(2).toString()));
-
-            // Formater la date
-            QString dateText = "";
-            if (!query.value(3).isNull()) {
-                QDate date = query.value(3).toDate();
-                dateText = date.toString("dd/MM/yyyy");
-            }
-            ui->tab->setItem(row, 3, new QTableWidgetItem(dateText));
-
-            ui->tab->setItem(row, 4, new QTableWidgetItem(query.value(4).toString()));
+        QString dateText = "";
+        if (!query.value(3).isNull()) {
+            dateText = query.value(3).toDate().toString("dd/MM/yyyy");
         }
+        ui->tab->setItem(row, 3, new QTableWidgetItem(dateText));
+        ui->tab->setItem(row, 4, new QTableWidgetItem(query.value(4).toString()));
 
-    } else {
-        QMessageBox::critical(this, "Erreur", "❌ Erreur lors du tri ascendant : " + query.lastError().text());
+        QString temperature = "";
+        if (!query.value(5).isNull()) {
+            temperature = QString::number(query.value(5).toInt()) + "°C";
+        }
+        ui->tab->setItem(row, 5, new QTableWidgetItem(temperature));
     }
 }
 
-// Fonction pour le tri descendant (pushButton_20)
-void MainWindow::on_pushButton_20_clicked()
+void MainWindow::on_pushButton_19_clicked() // Tri ascendant
 {
-    // Récupérer le critère de tri actuel du ComboBox
-    QString critereTri = ui->comboBox_5->currentText();
+    QString critere = ui->comboBox_5->currentText();
+    if (critere == "Trier par...") return;
+
     QString orderBy;
+    if (critere == "Immatriculation") orderBy = "IMMATRICULATION ASC";
+    else if (critere == "Kilométrage") orderBy = "KILOMÉTRAGE ASC";
+    else if (critere == "État") orderBy = "ÉTAT ASC";
+    else if (critere == "Date assurance") orderBy = "DATE_ASSURANCE ASC";
+    else if (critere == "Température") orderBy = "TEMPERATURE ASC";
+    else return;
 
-    if (critereTri == "Kilométrage") {
-        orderBy = "KILOMÉTRAGE DESC";
-    } else if (critereTri == "État") {
-        orderBy = "ÉTAT DESC";
-    } else if (critereTri == "Date assurance") {
-        orderBy = "DATE_ASSURANCE DESC";
-    } else {
-        // Tri par défaut par immatriculation
-        orderBy = "IMMATRICULATION DESC";
-    }
+    trierTableau(orderBy);
+}
 
-    // Exécuter la requête avec l'ordre descendant
-    QSqlQuery query;
-    QString sql = QString("SELECT IMMATRICULATION, MODÈLE_DU_VEHICLE, KILOMÉTRAGE, DATE_ASSURANCE, ÉTAT FROM VEHICULE ORDER BY %1").arg(orderBy);
+void MainWindow::on_pushButton_20_clicked() // Tri descendant
+{
+    QString critere = ui->comboBox_5->currentText();
+    if (critere == "Trier par...") return;
 
-    if (query.exec(sql)) {
-        ui->tab->setRowCount(0);
+    QString orderBy;
+    if (critere == "Immatriculation") orderBy = "IMMATRICULATION DESC";
+    else if (critere == "Kilométrage") orderBy = "KILOMÉTRAGE DESC";
+    else if (critere == "État") orderBy = "ÉTAT DESC";
+    else if (critere == "Date assurance") orderBy = "DATE_ASSURANCE DESC";
+    else if (critere == "Température") orderBy = "TEMPERATURE DESC";
+    else return;
 
-        while (query.next()) {
-            int row = ui->tab->rowCount();
-            ui->tab->insertRow(row);
+    trierTableau(orderBy);
+}
 
-            ui->tab->setItem(row, 0, new QTableWidgetItem(query.value(0).toString()));
-            ui->tab->setItem(row, 1, new QTableWidgetItem(query.value(1).toString()));
-            ui->tab->setItem(row, 2, new QTableWidgetItem(query.value(2).toString()));
+void MainWindow::trierTableau(const QString& orderBy)
+{
+    QSqlQuery query(QString("SELECT IMMATRICULATION, MODÈLE_DU_VEHICLE, KILOMÉTRAGE, DATE_ASSURANCE, ÉTAT, TEMPERATURE FROM VEHICULE ORDER BY %1").arg(orderBy));
 
-            // Formater la date
-            QString dateText = "";
-            if (!query.value(3).isNull()) {
-                QDate date = query.value(3).toDate();
-                dateText = date.toString("dd/MM/yyyy");
-            }
-            ui->tab->setItem(row, 3, new QTableWidgetItem(dateText));
+    ui->tab->setRowCount(0);
+    while (query.next()) {
+        int row = ui->tab->rowCount();
+        ui->tab->insertRow(row);
+        ui->tab->setItem(row, 0, new QTableWidgetItem(query.value(0).toString()));
+        ui->tab->setItem(row, 1, new QTableWidgetItem(query.value(1).toString()));
+        ui->tab->setItem(row, 2, new QTableWidgetItem(query.value(2).toString()));
 
-            ui->tab->setItem(row, 4, new QTableWidgetItem(query.value(4).toString()));
+        QString dateText = "";
+        if (!query.value(3).isNull()) {
+            dateText = query.value(3).toDate().toString("dd/MM/yyyy");
         }
+        ui->tab->setItem(row, 3, new QTableWidgetItem(dateText));
+        ui->tab->setItem(row, 4, new QTableWidgetItem(query.value(4).toString()));
 
-    } else {
-        QMessageBox::critical(this, "Erreur", "❌ Erreur lors du tri descendant : " + query.lastError().text());
+        QString temperature = "";
+        if (!query.value(5).isNull()) {
+            temperature = QString::number(query.value(5).toInt()) + "°C";
+        }
+        ui->tab->setItem(row, 5, new QTableWidgetItem(temperature));
     }
 }
 
-// Fonction pour naviguer vers la page 2 (statistiques)
+// === FONCTIONS STATISTIQUES ===
 void MainWindow::on_pushButton_statistique_6_clicked()
 {
-    // Changer l'index courant du stackedWidget vers la page 2
-    ui->stackedWidget->setCurrentIndex(2);
-
-    // Optionnel: Afficher un message de confirmation
-    QMessageBox::information(this, "Navigation", "Page des statistiques");
+    afficherStatistiquesKilometrage();
 }
 
-// Fonction pour retourner à la page 0 (page principale)
+void MainWindow::afficherStatistiquesKilometrage()
+{
+    QDialog* statsDialog = new QDialog(this);
+    statsDialog->setWindowTitle("Statistiques du Kilométrage");
+    statsDialog->resize(1000, 700);
+
+    QVBoxLayout* mainLayout = new QVBoxLayout(statsDialog);
+
+    QLabel* titleLabel = new QLabel("STATISTIQUES DU KILOMÉTRAGE");
+    titleLabel->setStyleSheet("font-size: 18px; font-weight: bold; color: #2c3e50; padding: 10px;");
+    titleLabel->setAlignment(Qt::AlignCenter);
+    mainLayout->addWidget(titleLabel);
+
+    // Récupérer les données
+    QSqlQuery query("SELECT KILOMÉTRAGE FROM VEHICULE WHERE KILOMÉTRAGE IS NOT NULL");
+
+    int totalVehicules = 0;
+    int sommeKilometrage = 0;
+    int minKm = INT_MAX;
+    int maxKm = 0;
+    QVector<int> kilometrages;
+
+    while (query.next()) {
+        int km = query.value(0).toInt();
+        kilometrages.append(km);
+        sommeKilometrage += km;
+        totalVehicules++;
+        if (km < minKm) minKm = km;
+        if (km > maxKm) maxKm = km;
+    }
+
+    if (totalVehicules == 0) {
+        QLabel* labelVide = new QLabel("Aucune donnée de kilométrage disponible");
+        labelVide->setStyleSheet("font-size: 14px; color: #e74c3c; padding: 20px;");
+        labelVide->setAlignment(Qt::AlignCenter);
+        mainLayout->addWidget(labelVide);
+
+        QDialogButtonBox* buttonBox = new QDialogButtonBox(QDialogButtonBox::Close);
+        connect(buttonBox, &QDialogButtonBox::rejected, statsDialog, &QDialog::reject);
+        mainLayout->addWidget(buttonBox);
+
+        statsDialog->exec();
+        return;
+    }
+
+    double moyenneKm = (double)sommeKilometrage / totalVehicules;
+
+    // Calcul des plages
+    QMap<QString, int> plages;
+    for (int km : kilometrages) {
+        QString plage;
+        if (km < 10000) plage = "0-10,000 km";
+        else if (km < 50000) plage = "10,000-50,000 km";
+        else if (km < 100000) plage = "50,000-100,000 km";
+        else if (km < 200000) plage = "100,000-200,000 km";
+        else plage = "200,000+ km";
+        plages[plage]++;
+    }
+
+    QTabWidget* tabWidget = new QTabWidget();
+
+    // Onglet Graphique
+    QWidget* tabGraphique = new QWidget();
+    QVBoxLayout* layoutGraphique = new QVBoxLayout(tabGraphique);
+
+    QChart* chartBar = new QChart();
+    chartBar->setTitle("Répartition par plage de kilométrage");
+    chartBar->setAnimationOptions(QChart::SeriesAnimations);
+
+    QBarSeries* seriesBar = new QBarSeries();
+
+    QVector<QColor> couleurs = {QColor("#3498db"), QColor("#2ecc71"), QColor("#e74c3c"), QColor("#f39c12")};
+    int colorIndex = 0;
+
+    for (auto it = plages.begin(); it != plages.end(); ++it) {
+        QBarSet* set = new QBarSet(it.key());
+        *set << it.value();
+        set->setColor(couleurs[colorIndex % couleurs.size()]);
+        seriesBar->append(set);
+        colorIndex++;
+    }
+
+    chartBar->addSeries(seriesBar);
+
+    QStringList categories;
+    for (auto it = plages.begin(); it != plages.end(); ++it) {
+        categories << it.key();
+    }
+
+    QBarCategoryAxis* axisX = new QBarCategoryAxis();
+    axisX->append(categories);
+    chartBar->addAxis(axisX, Qt::AlignBottom);
+    seriesBar->attachAxis(axisX);
+
+    QValueAxis* axisY = new QValueAxis();
+    chartBar->addAxis(axisY, Qt::AlignLeft);
+    seriesBar->attachAxis(axisY);
+
+    QChartView* chartViewBar = new QChartView(chartBar);
+    chartViewBar->setRenderHint(QPainter::Antialiasing);
+    layoutGraphique->addWidget(chartViewBar);
+    tabWidget->addTab(tabGraphique, "Diagramme");
+
+    // Onglet Statistiques détaillées
+    QWidget* tabNumeriques = new QWidget();
+    QVBoxLayout* layoutNumeriques = new QVBoxLayout(tabNumeriques);
+
+    QTextEdit* textStats = new QTextEdit();
+    textStats->setReadOnly(true);
+
+    QString html = QString(
+                       "<html><body style='font-family: Arial; margin: 20px;'>"
+                       "<h2>Statistiques Détaillées</h2>"
+                       "<table width='100%' border='1' style='border-collapse: collapse;'>"
+                       "<tr style='background-color: #3498db; color: white;'><th>Paramètre</th><th>Valeur</th></tr>"
+                       "<tr><td>Nombre total de véhicules</td><td><b>%1</b></td></tr>"
+                       "<tr><td>Kilométrage minimum</td><td><b>%2 km</b></td></tr>"
+                       "<tr><td>Kilométrage maximum</td><td><b>%3 km</b></td></tr>"
+                       "<tr><td>Kilométrage moyen</td><td><b>%4 km</b></td></tr>"
+                       "<tr><td>Kilométrage total</td><td><b>%5 km</b></td></tr>"
+                       "</table>"
+                       "<h3>Répartition par Plages</h3>"
+                       "<table width='100%' border='1' style='border-collapse: collapse;'>"
+                       "<tr style='background-color: #3498db; color: white;'><th>Plage</th><th>Nombre</th><th>Pourcentage</th></tr>"
+                       ).arg(totalVehicules).arg(minKm).arg(maxKm).arg(moyenneKm, 0, 'f', 0).arg(sommeKilometrage);
+
+    for (auto it = plages.begin(); it != plages.end(); ++it) {
+        double pourcentage = (it.value() * 100.0) / totalVehicules;
+        html += QString("<tr><td>%1</td><td>%2</td><td><b>%3%</b></td></tr>")
+                    .arg(it.key()).arg(it.value()).arg(pourcentage, 0, 'f', 1);
+    }
+
+    html += "</table></body></html>";
+    textStats->setHtml(html);
+    layoutNumeriques->addWidget(textStats);
+    tabWidget->addTab(tabNumeriques, "Détails");
+
+    mainLayout->addWidget(tabWidget);
+
+    QDialogButtonBox* buttonBox = new QDialogButtonBox(QDialogButtonBox::Close);
+    connect(buttonBox, &QDialogButtonBox::rejected, statsDialog, &QDialog::reject);
+    mainLayout->addWidget(buttonBox);
+
+    statsDialog->exec();
+}
+
 void MainWindow::on_pushButton_retour_3_clicked()
 {
-    // Changer l'index courant du stackedWidget vers la page 0
     ui->stackedWidget->setCurrentIndex(0);
-
-    // Optionnel: Afficher un message de confirmation
-    QMessageBox::information(this, "Navigation", "Retour à la page principale");
 }
 
-// Fonction pour naviguer vers la page Employé (page 3 - index 1)
 void MainWindow::on_Employe_5_clicked()
 {
-    // Changer l'index courant du stackedWidget vers la page 3 (index 1)
     ui->stackedWidget->setCurrentIndex(1);
+}
 
-    // Optionnel: Afficher un message de confirmation
-    QMessageBox::information(this, "Navigation", "Page des employés");
+// === FONCTIONS ALERTES ASSURANCE ===
+void MainWindow::analyserTableauPourAlertes() {
+    QMap<QString, QVector<QString>> vehiculesParCategorie;
+    QDate aujourdhui = QDate::currentDate();
+    int urgentCount = 0;
+    int attentionCount = 0;
+
+    for (int row = 0; row < ui->tab->rowCount(); ++row) {
+        QTableWidgetItem* itemDate = ui->tab->item(row, 3);
+        QTableWidgetItem* itemImmat = ui->tab->item(row, 0);
+        QTableWidgetItem* itemModele = ui->tab->item(row, 1);
+
+        if (itemDate && !itemDate->text().isEmpty() && itemImmat) {
+            QDate dateAssurance = QDate::fromString(itemDate->text(), "dd/MM/yyyy");
+            if (dateAssurance.isValid()) {
+                int joursRestants = aujourdhui.daysTo(dateAssurance);
+                QString infoVehicule = QString("%1 - %2 (Expire: %3)")
+                                           .arg(itemImmat->text())
+                                           .arg(itemModele ? itemModele->text() : "N/A")
+                                           .arg(dateAssurance.toString("dd/MM/yyyy"));
+
+                if (joursRestants <= 7 && joursRestants >= 0) {
+                    vehiculesParCategorie["URGENT"].append(infoVehicule);
+                    urgentCount++;
+                } else if (joursRestants <= 30 && joursRestants > 7) {
+                    vehiculesParCategorie["ATTENTION"].append(infoVehicule);
+                    attentionCount++;
+                }
+            }
+        }
+    }
+
+    if (urgentCount > 0 || attentionCount > 0) {
+        afficherAlerteAssurance(urgentCount, attentionCount, vehiculesParCategorie);
+    }
+}
+
+void MainWindow::verifierAlertesAssurance() {
+    analyserTableauPourAlertes();
+}
+
+void MainWindow::afficherAlerteAssurance(int urgentCount, int attentionCount, const QMap<QString, QVector<QString>>& vehiculesParCategorie) {
+    QDialog *alerteDialog = new QDialog(this);
+    alerteDialog->setWindowTitle("ALERTES ASSURANCE");
+    alerteDialog->resize(600, 400);
+
+    QVBoxLayout *layout = new QVBoxLayout(alerteDialog);
+
+    QLabel *titleLabel = new QLabel("ALERTES ASSURANCE VÉHICULES");
+    titleLabel->setStyleSheet("font-size: 18px; font-weight: bold; color: #c0392b; padding: 10px;");
+    titleLabel->setAlignment(Qt::AlignCenter);
+    layout->addWidget(titleLabel);
+
+    QTextEdit *alertContent = new QTextEdit();
+    alertContent->setReadOnly(true);
+
+    QString htmlContent = "<html><body style='font-family: Arial; font-size: 11pt;'>";
+    htmlContent += "<p style='color: #7f8c8d;'>Analyse effectuée le " + QDate::currentDate().toString("dd/MM/yyyy") + "</p>";
+
+    if (urgentCount > 0) {
+        htmlContent += QString(
+                           "<div style='background-color: #ffebee; border-left: 5px solid #c0392b; padding: 15px; margin: 10px 0;'>"
+                           "<h3 style='color: #c0392b; margin: 0;'>URGENT - Expire dans 7 jours</h3>"
+                           "<p style='margin: 5px 0;'><strong>%1 véhicule(s)</strong></p>"
+                           "</div>"
+                           ).arg(urgentCount);
+    }
+
+    if (attentionCount > 0) {
+        htmlContent += QString(
+                           "<div style='background-color: #fff3e0; border-left: 5px solid #f39c12; padding: 15px; margin: 10px 0;'>"
+                           "<h3 style='color: #f39c12; margin: 0;'>ATTENTION - Expire dans 8-30 jours</h3>"
+                           "<p style='margin: 5px 0;'><strong>%1 véhicule(s)</strong></p>"
+                           "</div>"
+                           ).arg(attentionCount);
+    }
+
+    htmlContent += "<h4>Véhicules concernés :</h4>";
+
+    for (auto it = vehiculesParCategorie.begin(); it != vehiculesParCategorie.end(); ++it) {
+        QString categorie = it.key();
+        QVector<QString> vehicules = it.value();
+
+        if (!vehicules.isEmpty()) {
+            htmlContent += "<h5>" + categorie + "</h5><ul>";
+            for (const QString& vehicule : vehicules) {
+                htmlContent += "<li>" + vehicule + "</li>";
+            }
+            htmlContent += "</ul>";
+        }
+    }
+
+    htmlContent += "</body></html>";
+    alertContent->setHtml(htmlContent);
+    layout->addWidget(alertContent);
+
+    QDialogButtonBox *buttonBox = new QDialogButtonBox(QDialogButtonBox::Ok);
+    connect(buttonBox, &QDialogButtonBox::accepted, alerteDialog, &QDialog::accept);
+    layout->addWidget(buttonBox);
+
+    alerteDialog->exec();
+}
+
+// === FONCTIONS ALERTES INTELLIGENTES ===
+void MainWindow::on_pushButton_alertes_clicked()
+{
+    QDialog *alertesDialog = new QDialog(this);
+    alertesDialog->setWindowTitle("Alertes Intelligentes - Assurances");
+    alertesDialog->resize(800, 600);
+
+    QVBoxLayout *layout = new QVBoxLayout(alertesDialog);
+
+    // Titre
+    QLabel *titleLabel = new QLabel("🚨 SYSTÈME D'ALERTES INTELLIGENTES");
+    titleLabel->setStyleSheet("font-size: 20px; font-weight: bold; color: #e74c3c; padding: 15px; background-color: #ffebee; border-radius: 10px;");
+    titleLabel->setAlignment(Qt::AlignCenter);
+    layout->addWidget(titleLabel);
+
+    // Conteneur avec onglets
+    QTabWidget *tabWidget = new QTabWidget();
+
+    // === ONGLET ALERTES ASSURANCE ===
+    QWidget *tabAssurance = new QWidget();
+    QVBoxLayout *layoutAssurance = new QVBoxLayout(tabAssurance);
+
+    QTextEdit *assuranceContent = new QTextEdit();
+    assuranceContent->setReadOnly(true);
+
+    // Analyser les assurances
+    QDate aujourdhui = QDate::currentDate();
+    QMap<QString, QVector<QString>> vehiculesParCategorie;
+    int urgentCount = 0;
+    int attentionCount = 0;
+    int normalCount = 0;
+    int expireCount = 0;
+
+    QSqlQuery query("SELECT IMMATRICULATION, MODÈLE_DU_VEHICLE, DATE_ASSURANCE FROM VEHICULE WHERE DATE_ASSURANCE IS NOT NULL");
+
+    while (query.next()) {
+        QString immatriculation = query.value(0).toString();
+        QString modele = query.value(1).toString();
+        QDate dateAssurance = query.value(2).toDate();
+
+        if (dateAssurance.isValid()) {
+            int joursRestants = aujourdhui.daysTo(dateAssurance);
+            QString infoVehicule = QString("%1 - %2 (Expire: %3 - J-%4)")
+                                       .arg(immatriculation)
+                                       .arg(modele)
+                                       .arg(dateAssurance.toString("dd/MM/yyyy"))
+                                       .arg(joursRestants);
+
+            if (joursRestants < 0) {
+                // ASSURANCE EXPIREE
+                vehiculesParCategorie["EXPIRE"].append(infoVehicule.replace("J-" + QString::number(joursRestants), "EXPIRÉE"));
+                expireCount++;
+            }
+            else if (joursRestants <= 7) {
+                vehiculesParCategorie["URGENT"].append(infoVehicule);
+                urgentCount++;
+            } else if (joursRestants <= 30) {
+                vehiculesParCategorie["ATTENTION"].append(infoVehicule);
+                attentionCount++;
+            } else {
+                vehiculesParCategorie["NORMAL"].append(infoVehicule);
+                normalCount++;
+            }
+        }
+    }
+
+    // Générer le contenu HTML
+    QString htmlContent = "<html><body style='font-family: Arial; font-size: 10pt;'>";
+
+    // Résumé
+    htmlContent += "<div style='background-color: #f8f9fa; padding: 15px; border-radius: 8px; margin-bottom: 20px;'>";
+    htmlContent += "<h3 style='color: #2c3e50; margin-top: 0;'>📊 RÉSUMÉ DES ALERTES</h3>";
+    htmlContent += "<table width='100%' style='border-collapse: collapse;'>";
+    htmlContent += "<tr style='background-color: #8B0000; color: white;'><td style='padding: 8px;'><strong>EXPIRÉ</strong></td><td style='padding: 8px;'><strong>" + QString::number(expireCount) + " véhicule(s)</strong></td></tr>";
+    htmlContent += "<tr style='background-color: #e74c3c; color: white;'><td style='padding: 8px;'><strong>URGENT (≤ 7 jours)</strong></td><td style='padding: 8px;'><strong>" + QString::number(urgentCount) + " véhicule(s)</strong></td></tr>";
+    htmlContent += "<tr style='background-color: #f39c12; color: white;'><td style='padding: 8px;'><strong>ATTENTION (8-30 jours)</strong></td><td style='padding: 8px;'><strong>" + QString::number(attentionCount) + " véhicule(s)</strong></td></tr>";
+    htmlContent += "<tr style='background-color: #27ae60; color: white;'><td style='padding: 8px;'><strong>NORMAL (> 30 jours)</strong></td><td style='padding: 8px;'><strong>" + QString::number(normalCount) + " véhicule(s)</strong></td></tr>";
+    htmlContent += "</table></div>";
+
+    // Alertes par catégorie
+    for (auto it = vehiculesParCategorie.begin(); it != vehiculesParCategorie.end(); ++it) {
+        QString categorie = it.key();
+        QVector<QString> vehicules = it.value();
+
+        if (!vehicules.isEmpty()) {
+            QString couleurFond, couleurTexte, icone;
+
+            if (categorie == "EXPIRE") {
+                couleurFond = "#ffcccc";
+                couleurTexte = "#8B0000";
+                icone = "⛔";
+            } else if (categorie == "URGENT") {
+                couleurFond = "#ffebee";
+                couleurTexte = "#c0392b";
+                icone = "🔴";
+            } else if (categorie == "ATTENTION") {
+                couleurFond = "#fff3e0";
+                couleurTexte = "#e67e22";
+                icone = "🟡";
+            } else {
+                couleurFond = "#e8f5e8";
+                couleurTexte = "#27ae60";
+                icone = "🟢";
+            }
+
+            htmlContent += QString(
+                               "<div style='background-color: %1; border-left: 5px solid %2; padding: 15px; margin: 10px 0; border-radius: 5px;'>"
+                               "<h3 style='color: %2; margin: 0 0 10px 0;'>%3 %4 (%5 véhicule(s))</h3>"
+                               "<ul style='color: %2; margin: 0;'>"
+                               ).arg(couleurFond).arg(couleurTexte).arg(icone).arg(categorie).arg(vehicules.size());
+
+            for (const QString& vehicule : vehicules) {
+                htmlContent += "<li style='margin-bottom: 5px;'>" + vehicule + "</li>";
+            }
+
+            htmlContent += "</ul></div>";
+        }
+    }
+
+    if (expireCount == 0 && urgentCount == 0 && attentionCount == 0) {
+        htmlContent += "<div style='background-color: #e8f5e8; padding: 20px; text-align: center; border-radius: 8px;'>";
+        htmlContent += "<h3 style='color: #27ae60;'>✅ TOUT EST EN ORDRE</h3>";
+        htmlContent += "<p>Aucune alerte d'assurance urgente à signaler.</p>";
+        htmlContent += "</div>";
+    }
+
+    htmlContent += "</body></html>";
+    assuranceContent->setHtml(htmlContent);
+    layoutAssurance->addWidget(assuranceContent);
+
+    tabWidget->addTab(tabAssurance, "📋 Alertes Assurance");
+
+    // === ONGLET STATISTIQUES ===
+    QWidget *tabStats = new QWidget();
+    QVBoxLayout *layoutStats = new QVBoxLayout(tabStats);
+
+    QTextEdit *statsContent = new QTextEdit();
+    statsContent->setReadOnly(true);
+
+    // Calculer les statistiques
+    int totalVehicules = expireCount + urgentCount + attentionCount + normalCount;
+    QString statsHtml = "<html><body style='font-family: Arial; font-size: 10pt;'>";
+    statsHtml += "<h3 style='color: #2c3e50;'>📈 STATISTIQUES DES ASSURANCES</h3>";
+
+    if (totalVehicules > 0) {
+        double pourcentageExpire = (expireCount * 100.0) / totalVehicules;
+        double pourcentageUrgent = (urgentCount * 100.0) / totalVehicules;
+        double pourcentageAttention = (attentionCount * 100.0) / totalVehicules;
+        double pourcentageNormal = (normalCount * 100.0) / totalVehicules;
+
+        statsHtml += "<table width='100%' style='border-collapse: collapse; margin: 15px 0;'>";
+        statsHtml += "<tr style='background-color: #34495e; color: white;'><th style='padding: 10px;'>Catégorie</th><th style='padding: 10px;'>Nombre</th><th style='padding: 10px;'>Pourcentage</th><th style='padding: 10px;'>Barre</th></tr>";
+
+        statsHtml += QString("<tr><td style='padding: 8px; border: 1px solid #ddd;'>⛔ EXPIRÉ</td><td style='padding: 8px; border: 1px solid #ddd;'>%1</td><td style='padding: 8px; border: 1px solid #ddd;'>%2%</td><td style='padding: 8px; border: 1px solid #ddd;'><div style='background-color: #8B0000; height: 20px; width: %3%; border-radius: 3px;'></div></td></tr>")
+                         .arg(expireCount).arg(pourcentageExpire, 0, 'f', 1).arg(pourcentageExpire);
+
+        statsHtml += QString("<tr><td style='padding: 8px; border: 1px solid #ddd;'>🔴 URGENT</td><td style='padding: 8px; border: 1px solid #ddd;'>%1</td><td style='padding: 8px; border: 1px solid #ddd;'>%2%</td><td style='padding: 8px; border: 1px solid #ddd;'><div style='background-color: #e74c3c; height: 20px; width: %3%; border-radius: 3px;'></div></td></tr>")
+                         .arg(urgentCount).arg(pourcentageUrgent, 0, 'f', 1).arg(pourcentageUrgent);
+
+        statsHtml += QString("<tr><td style='padding: 8px; border: 1px solid #ddd;'>🟡 ATTENTION</td><td style='padding: 8px; border: 1px solid #ddd;'>%1</td><td style='padding: 8px; border: 1px solid #ddd;'>%2%</td><td style='padding: 8px; border: 1px solid #ddd;'><div style='background-color: #f39c12; height: 20px; width: %3%; border-radius: 3px;'></div></td></tr>")
+                         .arg(attentionCount).arg(pourcentageAttention, 0, 'f', 1).arg(pourcentageAttention);
+
+        statsHtml += QString("<tr><td style='padding: 8px; border: 1px solid #ddd;'>🟢 NORMAL</td><td style='padding: 8px; border: 1px solid #ddd;'>%1</td><td style='padding: 8px; border: 1px solid #ddd;'>%2%</td><td style='padding: 8px; border: 1px solid #ddd;'><div style='background-color: #27ae60; height: 20px; width: %3%; border-radius: 3px;'></div></td></tr>")
+                         .arg(normalCount).arg(pourcentageNormal, 0, 'f', 1).arg(pourcentageNormal);
+
+        statsHtml += "</table>";
+
+        // Recommandations
+        statsHtml += "<div style='background-color: #e3f2fd; padding: 15px; border-radius: 8px; margin-top: 20px;'>";
+        statsHtml += "<h4 style='color: #1976d2;'>💡 RECOMMANDATIONS</h4>";
+        statsHtml += "<ul>";
+        if (expireCount > 0) {
+            statsHtml += "<li><strong>ACTION IMMÉDIATE CRITIQUE :</strong> Les assurances de " + QString::number(expireCount) + " véhicule(s) sont EXPIRÉES !</li>";
+        }
+        if (urgentCount > 0) {
+            statsHtml += "<li><strong>Action immédiate nécessaire :</strong> Renouvelez les assurances des véhicules en alerte URGENTE</li>";
+        }
+        if (attentionCount > 0) {
+            statsHtml += "<li><strong>Planification recommandée :</strong> Prévoyez le renouvellement des véhicules en alerte ATTENTION</li>";
+        }
+        if (normalCount == totalVehicules) {
+            statsHtml += "<li><strong>Excellent :</strong> Toutes les assurances sont à jour pour plus de 30 jours</li>";
+        }
+        statsHtml += "</ul></div>";
+    } else {
+        statsHtml += "<p style='color: #7f8c8d; text-align: center;'>Aucune donnée d'assurance disponible.</p>";
+    }
+
+    statsHtml += "</body></html>";
+    statsContent->setHtml(statsHtml);
+    layoutStats->addWidget(statsContent);
+
+    tabWidget->addTab(tabStats, "📊 Statistiques");
+
+    layout->addWidget(tabWidget);
+
+    // Boutons
+    QDialogButtonBox *buttonBox = new QDialogButtonBox(QDialogButtonBox::Close | QDialogButtonBox::Ok);
+    buttonBox->button(QDialogButtonBox::Ok)->setText("Actualiser");
+    connect(buttonBox, &QDialogButtonBox::rejected, alertesDialog, &QDialog::reject);
+    connect(buttonBox, &QDialogButtonBox::accepted, alertesDialog, [this, alertesDialog]() {
+        alertesDialog->close();
+        on_pushButton_alertes_clicked(); // Rappeler la fonction pour actualiser
+    });
+
+    layout->addWidget(buttonBox);
+
+    alertesDialog->exec();
+}
+
+void MainWindow::verifierAssurances30Jours()
+{
+    QDate aujourdhui = QDate::currentDate();
+    int vehiculesAlerte = 0;
+    int vehiculesUrgents = 0;
+    int vehiculesExpires = 0;
+    QStringList vehiculesConcernes;
+    QStringList vehiculesUrgentsList;
+    QStringList vehiculesExpiresList;
+
+    QSqlQuery query("SELECT IMMATRICULATION, MODÈLE_DU_VEHICLE, DATE_ASSURANCE FROM VEHICULE WHERE DATE_ASSURANCE IS NOT NULL");
+
+    while (query.next()) {
+        QDate dateAssurance = query.value(2).toDate();
+        if (dateAssurance.isValid()) {
+            int joursRestants = aujourdhui.daysTo(dateAssurance);
+
+            if (joursRestants < 0) {
+                // ASSURANCE EXPIREE
+                vehiculesExpires++;
+                QString vehiculeInfo = QString("%1 - %2 (EXPIRÉE)")
+                                           .arg(query.value(0).toString())
+                                           .arg(query.value(1).toString());
+                vehiculesExpiresList << vehiculeInfo;
+            }
+            else if (joursRestants <= 30) {
+                vehiculesAlerte++;
+                QString vehiculeInfo = QString("%1 - %2 (J-%3)")
+                                           .arg(query.value(0).toString())
+                                           .arg(query.value(1).toString())
+                                           .arg(joursRestants);
+                vehiculesConcernes << vehiculeInfo;
+
+                if (joursRestants <= 7) {
+                    vehiculesUrgents++;
+                    vehiculesUrgentsList << vehiculeInfo;
+                }
+            }
+        }
+    }
+
+    // METTRE À JOUR LE BOUTON
+    mettreAJourBoutonAlertes(vehiculesAlerte, vehiculesUrgents, vehiculesExpires);
+
+    if (vehiculesExpires > 0 || vehiculesAlerte > 0) {
+        // Afficher une alerte discrète dans la barre de status
+        QString message;
+        if (vehiculesExpires > 0) {
+            message = QString("⛔ %1 véhicule(s) avec assurance EXPIRÉE").arg(vehiculesExpires);
+            statusBar()->setStyleSheet("background-color: #8B0000; color: white; padding: 5px;");
+        } else {
+            message = QString("⚠️ %1 véhicule(s) avec assurance expirant dans ≤ 30 jours").arg(vehiculesAlerte);
+            statusBar()->setStyleSheet("background-color: #fff3cd; color: #856404; padding: 5px;");
+        }
+        statusBar()->showMessage(message, 10000);
+
+        // NOTIFICATION AVEC ICÔNE
+        int alertLevel;
+        QString notificationTitle;
+        QString notificationMessage;
+
+        if (vehiculesExpires > 0) {
+            alertLevel = 2; // Critique
+            notificationTitle = "⛔ ASSURANCES EXPIRÉES !";
+            notificationMessage = QString("%1 véhicule(s) avec assurance EXPIRÉE\n%2 véhicule(s) URGENTS\n%3 véhicule(s) à surveiller")
+                                      .arg(vehiculesExpires)
+                                      .arg(vehiculesUrgents)
+                                      .arg(vehiculesAlerte - vehiculesUrgents);
+        } else if (vehiculesUrgents > 0) {
+            alertLevel = 2; // Critique
+            notificationTitle = "🚨 ALERTE URGENTE - Assurances";
+            notificationMessage = QString("%1 véhicule(s) URGENTS (%2 au total)\nExpirent dans ≤ 7 jours")
+                                      .arg(vehiculesUrgents)
+                                      .arg(vehiculesAlerte);
+        } else {
+            alertLevel = 1; // Avertissement
+            notificationTitle = "⚠️ Alertes Assurances";
+            notificationMessage = QString("%1 véhicule(s) à surveiller\nExpiration dans 8-30 jours")
+                                      .arg(vehiculesAlerte);
+        }
+
+        showTrayNotification(notificationTitle, notificationMessage, alertLevel);
+
+        // Afficher aussi un message dans la console
+        qDebug() << "=== ALERTES ASSURANCE ===";
+        qDebug() << "Message:" << message;
+        if (vehiculesExpires > 0) {
+            qDebug() << "Véhicules EXPIRÉS:" << vehiculesExpiresList;
+        }
+        qDebug() << "Véhicules concernés:" << vehiculesConcernes;
+        if (vehiculesUrgents > 0) {
+            qDebug() << "Véhicules URGENTS:" << vehiculesUrgentsList;
+        }
+
+    } else {
+        // Aucune alerte - notification positive
+        showTrayNotification("✅ Aucune Alerte",
+                             "Toutes les assurances sont à jour pour plus de 30 jours",
+                             0); // Niveau information
+
+        statusBar()->showMessage("✅ Aucun véhicule avec assurance expirant dans ≤ 30 jours", 5000);
+        statusBar()->setStyleSheet("background-color: #d4edda; color: #155724; padding: 5px;");
+
+        qDebug() << "✅ Aucun véhicule avec assurance expirant dans ≤ 30 jours";
+
+        // Réinitialiser le compteur si plus d'alertes
+        alertCount = 0;
+        updateTrayIcon();
+    }
+}
+
+void MainWindow::mettreAJourBoutonAlertes(int vehiculesAlerte, int vehiculesUrgents, int vehiculesExpires)
+{
+    QPushButton *btnVehicule6 = findChild<QPushButton*>("Vehicule_6");
+    if (!btnVehicule6) return;
+
+    QString texteBouton;
+    QString styleSheet;
+
+    if (vehiculesExpires > 0) {
+        // ASSURANCE EXPIREE - bouton rouge foncé avec emoji d'expiration
+        texteBouton = QString("⛔ Véhicule (%1 EXP.)").arg(vehiculesExpires);
+        styleSheet =
+            "QPushButton {"
+            "    background-color: #8B0000;"
+            "    color: white;"
+            "    font-weight: bold;"
+            "    font-size: 14px;"
+            "    padding: 10px;"
+            "    border: 2px solid #660000;"
+            "    border-radius: 8px;"
+            "}"
+            "QPushButton:hover {"
+            "    background-color: #660000;"
+            "    border: 2px solid #550000;"
+            "}"
+            "QPushButton:pressed {"
+            "    background-color: #550000;"
+            "}";
+    }
+    else if (vehiculesUrgents > 0) {
+        // Alerte URGENTE - bouton rouge avec emoji d'urgence
+        texteBouton = QString("🚨 Véhicule (%1 URG.)").arg(vehiculesUrgents);
+        styleSheet =
+            "QPushButton {"
+            "    background-color: #ff4444;"
+            "    color: white;"
+            "    font-weight: bold;"
+            "    font-size: 14px;"
+            "    padding: 10px;"
+            "    border: 2px solid #cc0000;"
+            "    border-radius: 8px;"
+            "}"
+            "QPushButton:hover {"
+            "    background-color: #cc0000;"
+            "    border: 2px solid #aa0000;"
+            "}"
+            "QPushButton:pressed {"
+            "    background-color: #aa0000;"
+            "}";
+    }
+    else if (vehiculesAlerte > 0) {
+        // Alerte normale - bouton orange avec emoji d'avertissement
+        texteBouton = QString("⚠️ Véhicule (%1 Alt.)").arg(vehiculesAlerte);
+        styleSheet =
+            "QPushButton {"
+            "    background-color: #ffaa00;"
+            "    color: white;"
+            "    font-weight: bold;"
+            "    font-size: 14px;"
+            "    padding: 10px;"
+            "    border: 2px solid #cc8800;"
+            "    border-radius: 8px;"
+            "}"
+            "QPushButton:hover {"
+            "    background-color: #cc8800;"
+            "    border: 2px solid #aa6600;"
+            "}"
+            "QPushButton:pressed {"
+            "    background-color: #aa6600;"
+            "}";
+    }
+    else {
+        // Aucune alerte - bouton VERT sans emoji
+        texteBouton = "Véhicule";
+        styleSheet =
+            "QPushButton {"
+            "    background-color: #4CAF50;"
+            "    color: white;"
+            "    font-weight: bold;"
+            "    font-size: 14px;"
+            "    padding: 10px;"
+            "    border: 2px solid #45a049;"
+            "    border-radius: 8px;"
+            "}"
+            "QPushButton:hover {"
+            "    background-color: #45a049;"
+            "    border: 2px solid #3d8b40;"
+            "}"
+            "QPushButton:pressed {"
+            "    background-color: #3d8b40;"
+            "}";
+    }
+
+    btnVehicule6->setText(texteBouton);
+    btnVehicule6->setStyleSheet(styleSheet);
 }

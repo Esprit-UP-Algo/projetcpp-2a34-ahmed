@@ -10,7 +10,7 @@ int main(int argc, char *argv[])
     Connection c;
 
     if(!c.connect()) {
-        QMessageBox::critical(nullptr, QObject::tr("❌ Connexion échouée"),
+        QMessageBox::critical(nullptr, QObject::tr(" Connexion échouée"),
                               QObject::tr("Impossible de se connecter à la base Oracle."));
         return a.exec();
     }

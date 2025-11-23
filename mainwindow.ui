@@ -17,8 +17,8 @@
    <widget class="QStackedWidget" name="stackedWidget">
     <property name="geometry">
      <rect>
-      <x>30</x>
-      <y>-30</y>
+      <x>0</x>
+      <y>0</y>
       <width>1581</width>
       <height>811</height>
      </rect>
@@ -3161,7 +3161,7 @@ font: 350 11pt &quot;Segoe UI Variable&quot;;</string>
      <widget class="QLineEdit" name="recherche_8">
       <property name="geometry">
        <rect>
-        <x>280</x>
+        <x>250</x>
         <y>20</y>
         <width>201</width>
         <height>41</height>
@@ -5076,6 +5076,62 @@ background-color: rgb(255, 255, 255);</string>
       <property name="styleSheet">
        <string notr="true">color: rgb(0, 0, 0);
 background-color: rgb(255, 255, 255);</string>
+      </property>
+     </widget>
+     <widget class="QLabel" name="label_3">
+      <property name="geometry">
+       <rect>
+        <x>730</x>
+        <y>20</y>
+        <width>331</width>
+        <height>71</height>
+       </rect>
+      </property>
+      <property name="styleSheet">
+       <string notr="true">color: rgb(0, 0, 0);
+background-color: rgb(255, 255, 255);</string>
+      </property>
+      <property name="text">
+       <string>TextLabel</string>
+      </property>
+     </widget>
+     <widget class="QPushButton" name="pushButton">
+      <property name="geometry">
+       <rect>
+        <x>620</x>
+        <y>10</y>
+        <width>90</width>
+        <height>29</height>
+       </rect>
+      </property>
+      <property name="text">
+       <string>PushButton</string>
+      </property>
+     </widget>
+     <widget class="QPushButton" name="pushButton_alertes">
+      <property name="geometry">
+       <rect>
+        <x>510</x>
+        <y>10</y>
+        <width>90</width>
+        <height>29</height>
+       </rect>
+      </property>
+      <property name="text">
+       <string>PushButton</string>
+      </property>
+     </widget>
+     <widget class="QLabel" name="label">
+      <property name="geometry">
+       <rect>
+        <x>560</x>
+        <y>0</y>
+        <width>63</width>
+        <height>20</height>
+       </rect>
+      </property>
+      <property name="text">
+       <string>TextLabel</string>
       </property>
      </widget>
     </widget>
@@ -8703,7 +8759,7 @@ font: 600 11pt &quot;Segoe UI&quot;;
        <string>Nom</string>
       </property>
      </widget>
-     <widget class="QTextEdit" name="textnom_9">
+     <widget class="QTextEdit" name="nom_employe">
       <property name="geometry">
        <rect>
         <x>270</x>
@@ -9216,7 +9272,7 @@ font: 600 11pt &quot;Segoe UI&quot;;
        <string>Prénom</string>
       </property>
      </widget>
-     <widget class="QTextEdit" name="textespecialite_2">
+     <widget class="QTextEdit" name="prenom_employe">
       <property name="geometry">
        <rect>
         <x>270</x>
@@ -9718,7 +9774,7 @@ font: 600 11pt &quot;Segoe UI&quot;;
        <string>Disponibilité</string>
       </property>
      </widget>
-     <widget class="QTextEdit" name="textdisponibilite_2">
+     <widget class="QTextEdit" name="disponibilite_employe">
       <property name="geometry">
        <rect>
         <x>270</x>
@@ -10220,7 +10276,7 @@ font: 600 11pt &quot;Segoe UI&quot;;
        <string>Téléphone</string>
       </property>
      </widget>
-     <widget class="QTextEdit" name="texttelephone_3">
+     <widget class="QTextEdit" name="telephone_employe">
       <property name="geometry">
        <rect>
         <x>270</x>
@@ -10723,7 +10779,7 @@ font: 600 11pt &quot;Segoe UI&quot;;
        <string>CIN</string>
       </property>
      </widget>
-     <widget class="QTextEdit" name="textcin_2">
+     <widget class="QTextEdit" name="cin_employe">
       <property name="geometry">
        <rect>
         <x>270</x>
@@ -11207,7 +11263,7 @@ background-color: rgb(255, 255, 255);
 font: 9pt &quot;Segoe UI&quot;;</string>
       </property>
      </widget>
-     <widget class="QPushButton" name="annuler_3">
+     <widget class="QPushButton" name="annuler_employe">
       <property name="geometry">
        <rect>
         <x>370</x>
@@ -11227,7 +11283,7 @@ font: 350 11pt &quot;Segoe UI Variable&quot;;</string>
        <iconset theme="QIcon::ThemeIcon::EditClear"/>
       </property>
      </widget>
-     <widget class="QTableWidget" name="tableWidget_6">
+     <widget class="QTableWidget" name="tab_employe">
       <property name="geometry">
        <rect>
         <x>510</x>
@@ -11294,7 +11350,7 @@ background-color: rgb(0, 170, 255);</string>
        </property>
       </item>
      </widget>
-     <widget class="QLineEdit" name="identifant_6">
+     <widget class="QLineEdit" name="recherche_employe">
       <property name="geometry">
        <rect>
         <x>740</x>
@@ -11875,7 +11931,7 @@ font: 600 11pt &quot;Segoe UI&quot;;
        <iconset theme="QIcon::ThemeIcon::DocumentPrint"/>
       </property>
      </widget>
-     <widget class="QPushButton" name="Supprimer_6">
+     <widget class="QPushButton" name="supprimer_employe">
       <property name="geometry">
        <rect>
         <x>1060</x>
@@ -12392,7 +12448,7 @@ font: 600 11pt &quot;Segoe UI&quot;;
        <iconset theme="QIcon::ThemeIcon::EditClear"/>
       </property>
      </widget>
-     <widget class="QPushButton" name="btnValider_9">
+     <widget class="QPushButton" name="ajouter_employe">
       <property name="geometry">
        <rect>
         <x>240</x>
@@ -12412,7 +12468,7 @@ font: 350 11pt &quot;Segoe UI Variable&quot;;</string>
        <iconset theme="QIcon::ThemeIcon::ContactNew"/>
       </property>
      </widget>
-     <widget class="QPushButton" name="modifier_6">
+     <widget class="QPushButton" name="modifier_employe">
       <property name="geometry">
        <rect>
         <x>310</x>
