@@ -1,0 +1,38 @@
+# Fichiers de compilation
+build/
+*.o
+*.a
+*.exe
+
+# Fichiers Qt
+*.pro.user
+*.pro.user.*
+*.autosave
+moc_*
+qrc_*
+ui_*
+
+# CMake
+CMakeCache.txt
+CMakeFiles/
+cmake_install.cmake
+Makefile
+
+# Fichiers IDE
+.vscode/
+.idea/
+*.swp
+*.swo
+
+# Fichiers temporaires
+*.tmp
+*.temp
+*.log
+
+# Fichiers système
+.DS_Store
+Thumbs.db
+
+# Fichiers d'application
+*.app
+*.dmg
